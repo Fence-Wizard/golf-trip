@@ -4,6 +4,7 @@ import {
   HoleData,
   RoundLiveState,
   RoundTemplate,
+  TeamDelegateAssignmentsByRound,
   TeamEntrySubmissionsByRound,
   TeamScoresByRound,
 } from "@/lib/trip/types";
@@ -216,22 +217,44 @@ export function buildInitialTeamScores(): TeamScoresByRound {
   return data;
 }
 
-export function getTeamScorers(roundId: number, teamIndex: number): [string, string] {
+function getCaptainForTeam(roundId: number, teamIndex: number): string {
   const round = roundTemplates.find((item) => item.id === roundId) ?? roundTemplates[0];
   const group = round.teeTimes[teamIndex];
-  if (!group) return [TEAM_CAPTAINS[0], TEAM_CAPTAINS[0]];
+  if (!group) return TEAM_CAPTAINS[0];
   const preferredCaptain = TEAM_CAPTAINS[teamIndex] ?? group.players[0];
-  const captain = group.players.includes(preferredCaptain) ? preferredCaptain : group.players[0];
-  const delegate = group.players.find((player) => player !== captain) ?? captain;
+  return group.players.includes(preferredCaptain) ? preferredCaptain : group.players[0];
+}
+
+export function getTeamScorers(roundId: number, teamIndex: number, delegateOverride?: string | null): [string, string] {
+  const round = roundTemplates.find((item) => item.id === roundId) ?? roundTemplates[0];
+  const group = round.teeTimes[teamIndex];
+  const captain = getCaptainForTeam(roundId, teamIndex);
+  if (!group) return [captain, captain];
+  const candidate = delegateOverride && group.players.includes(delegateOverride) ? delegateOverride : null;
+  const delegate = candidate && candidate !== captain ? candidate : group.players.find((player) => player !== captain) ?? captain;
   return [captain, delegate];
 }
 
-export function buildInitialTeamEntrySubmissions(): TeamEntrySubmissionsByRound {
+export function buildInitialTeamDelegates(): TeamDelegateAssignmentsByRound {
+  const data: TeamDelegateAssignmentsByRound = {};
+  for (const round of roundTemplates) {
+    data[round.id] = {};
+    for (const [teamIndex] of round.teeTimes.entries()) {
+      const [, delegate] = getTeamScorers(round.id, teamIndex);
+      data[round.id][teamIndex] = delegate;
+    }
+  }
+  return data;
+}
+
+export function buildInitialTeamEntrySubmissions(
+  delegateAssignments: TeamDelegateAssignmentsByRound = buildInitialTeamDelegates(),
+): TeamEntrySubmissionsByRound {
   const data: TeamEntrySubmissionsByRound = {};
   for (const round of roundTemplates) {
     data[round.id] = {};
     for (const [teamIndex] of round.teeTimes.entries()) {
-      const [scorerA, scorerB] = getTeamScorers(round.id, teamIndex);
+      const [scorerA, scorerB] = getTeamScorers(round.id, teamIndex, delegateAssignments[round.id]?.[teamIndex]);
       data[round.id][teamIndex] = {
         [scorerA]: Array.from({ length: 18 }, () => ""),
         [scorerB]: Array.from({ length: 18 }, () => ""),

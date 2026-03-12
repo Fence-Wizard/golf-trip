@@ -32,18 +32,20 @@ export function TeamScoreEntry({ roundId }: { roundId: number }) {
       <p className="muted">Each team uses two scorers (captain + delegate). Mismatches require review.</p>
 
       <div className="stack-md">
-        {teams.map((team, teamIndex) => (
-          <div key={team.teamName} className="inner-card">
+        {teams.map((team, teamIndex) => {
+          const delegateOverride = tripState.teamDelegateAssignments[roundId]?.[teamIndex];
+          const [scorerA, scorerB] = getTeamScorers(roundId, teamIndex, delegateOverride);
+          const canEditThisTeam = canUseTeamEntry(session, roundId, teamIndex, delegateOverride);
+          return (
+            <div key={team.teamName} className="inner-card">
             <div className="row-between">
               <h3>{team.teamName}</h3>
               <div className="row-wrap">
                 <span className="badge">{team.players.join(", ")}</span>
-                <span className="badge">
-                  Scorers: {getTeamScorers(roundId, teamIndex).join(" + ")}
-                </span>
+                <span className="badge">Scorers: {[scorerA, scorerB].join(" + ")}</span>
               </div>
             </div>
-            {!canUseTeamEntry(session, roundId, teamIndex) ? (
+            {!canEditThisTeam ? (
               <p className="warning">Only assigned scorers for this team can enter this card.</p>
             ) : null}
             <div className="grid-holes">
@@ -56,7 +58,7 @@ export function TeamScoreEntry({ roundId }: { roundId: number }) {
                     min={1}
                     max={Math.min(maxStrokesPerHole, (roundCourse[holeIndex]?.par ?? 4) + 2)}
                     value={score}
-                    disabled={!canUseTeamEntry(session, roundId, teamIndex)}
+                    disabled={!canEditThisTeam}
                     aria-label={`Team ${team.teamName} hole ${holeIndex + 1} score`}
                     onChange={(e) => {
                       if (e.target.value.trim() === "") {
@@ -73,8 +75,9 @@ export function TeamScoreEntry({ roundId }: { roundId: number }) {
                 </label>
               ))}
             </div>
-          </div>
-        ))}
+            </div>
+          );
+        })}
       </div>
 
       {openDiscrepancies.length > 0 ? (

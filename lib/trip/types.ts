@@ -88,6 +88,7 @@ export type IndividualScoresByRound = Record<number, Record<string, Array<number
 export type CourseDataByRound = Record<number, HoleData[]>;
 export type TeamScoresByRound = Record<number, TeamCard[]>;
 export type EntryModeByRound = Record<number, ScoreEntryMode>;
+export type TeamDelegateAssignmentsByRound = Record<number, Record<number, string>>;
 export type TeamEntrySubmissionsByRound = Record<
   number,
   Record<number, Record<string, Array<number | "">>>
@@ -113,6 +114,7 @@ export interface TeamScoreDiscrepancy {
 export interface TripState {
   individualScores: IndividualScoresByRound;
   teamScores: TeamScoresByRound;
+  teamDelegateAssignments: TeamDelegateAssignmentsByRound;
   teamEntrySubmissions: TeamEntrySubmissionsByRound;
   teamScoreDiscrepancies: TeamScoreDiscrepancy[];
   courseDataDraft: CourseDataByRound;

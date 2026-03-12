@@ -1,6 +1,7 @@
 import {
   buildInitialCoursePublication,
   buildInitialCourseData,
+  buildInitialTeamDelegates,
   getTeamScorers,
   buildInitialTeamEntrySubmissions,
   buildInitialIndividualScores,
@@ -17,10 +18,12 @@ const TRIP_STORAGE_KEY = "williamsburg_trip_state_v2";
 
 export function buildInitialTripState(): TripState {
   const published = buildInitialCourseData();
+  const delegates = buildInitialTeamDelegates();
   return {
     individualScores: buildInitialIndividualScores(),
     teamScores: buildInitialTeamScores(),
-    teamEntrySubmissions: buildInitialTeamEntrySubmissions(),
+    teamDelegateAssignments: delegates,
+    teamEntrySubmissions: buildInitialTeamEntrySubmissions(delegates),
     teamScoreDiscrepancies: [],
     courseDataDraft: buildInitialCourseData(),
     courseDataPublished: published,
@@ -47,6 +50,7 @@ function normalizeTripState(raw: Partial<TripState>): TripState {
     },
     scoreEditHistory: raw.scoreEditHistory ?? [],
     scoreConflicts: raw.scoreConflicts ?? [],
+    teamDelegateAssignments: raw.teamDelegateAssignments ?? base.teamDelegateAssignments,
     teamEntrySubmissions: raw.teamEntrySubmissions ?? base.teamEntrySubmissions,
     teamScoreDiscrepancies: raw.teamScoreDiscrepancies ?? [],
   };
@@ -107,8 +111,16 @@ function normalizeTripState(raw: Partial<TripState>): TripState {
     const baseRoundSubs = base.teamEntrySubmissions[roundId] ?? {};
     const currentRoundSubs = normalized.teamEntrySubmissions[roundId] ?? {};
     normalized.teamEntrySubmissions[roundId] = { ...baseRoundSubs, ...currentRoundSubs };
+    normalized.teamDelegateAssignments[roundId] = {
+      ...(base.teamDelegateAssignments[roundId] ?? {}),
+      ...(normalized.teamDelegateAssignments[roundId] ?? {}),
+    };
     for (const [teamIndex] of round.teeTimes.entries()) {
-      const [scorerA, scorerB] = getTeamScorers(roundId, teamIndex);
+      const [scorerA, scorerB] = getTeamScorers(
+        roundId,
+        teamIndex,
+        normalized.teamDelegateAssignments[roundId]?.[teamIndex],
+      );
       const baseTeamSubs = baseRoundSubs[teamIndex] ?? {};
       const currentTeamSubs = normalized.teamEntrySubmissions[roundId][teamIndex] ?? {};
       normalized.teamEntrySubmissions[roundId][teamIndex] = {

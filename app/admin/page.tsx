@@ -5,11 +5,12 @@ import { AppShell } from "@/components/trip/AppShell";
 import { CourseAdminEditor } from "@/components/trip/CourseAdminEditor";
 import { RequireAdmin, RequireSession } from "@/components/trip/RequireSession";
 import { useTrip } from "@/components/trip/TripProvider";
-import { roundTemplates } from "@/lib/trip/config";
+import { getTeamScorers, roundTemplates } from "@/lib/trip/config";
 
 export default function AdminPage() {
   const [selectedRoundId, setSelectedRoundId] = useState(1);
-  const { tripState, loadDemoScores, clearDemoScores } = useTrip();
+  const { tripState, loadDemoScores, clearDemoScores, setTeamDelegateForRound } = useTrip();
+  const selectedRound = roundTemplates.find((round) => round.id === selectedRoundId) ?? roundTemplates[0];
   const recentEdits = tripState.scoreEditHistory
     .filter((event) => event.roundId === selectedRoundId)
     .slice(-20)
@@ -56,6 +57,46 @@ export default function AdminPage() {
               ))}
             </select>
           </section>
+          {[2, 3, 4].includes(selectedRoundId) ? (
+            <section className="card">
+              <h2>Team Delegate Assignments</h2>
+              <p className="muted">
+                Set the second scorer per team for this round. Captains remain fixed (Lee/Sam/Todd by team order).
+              </p>
+              <div className="stack-sm">
+                {selectedRound.teeTimes.map((team, teamIndex) => {
+                  const delegateOverride = tripState.teamDelegateAssignments[selectedRoundId]?.[teamIndex];
+                  const [captain, delegate] = getTeamScorers(selectedRoundId, teamIndex, delegateOverride);
+                  return (
+                    <div key={`${selectedRoundId}-delegate-${teamIndex}`} className="inner-card">
+                      <div className="row-between">
+                        <strong>Team {teamIndex + 1}</strong>
+                        <span className="badge">{team.players.join(", ")}</span>
+                      </div>
+                      <p className="muted">Captain: {captain}</p>
+                      <label className="label" htmlFor={`delegate-${selectedRoundId}-${teamIndex}`}>
+                        Delegate scorer
+                      </label>
+                      <select
+                        id={`delegate-${selectedRoundId}-${teamIndex}`}
+                        className="input"
+                        value={delegate}
+                        onChange={(e) => setTeamDelegateForRound(selectedRoundId, teamIndex, e.target.value)}
+                      >
+                        {team.players
+                          .filter((player) => player !== captain)
+                          .map((player) => (
+                            <option key={`${selectedRoundId}-${teamIndex}-${player}`} value={player}>
+                              {player}
+                            </option>
+                          ))}
+                      </select>
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+          ) : null}
           <CourseAdminEditor roundId={selectedRoundId} />
           <section className="card">
             <h2>Round Score Edit History</h2>

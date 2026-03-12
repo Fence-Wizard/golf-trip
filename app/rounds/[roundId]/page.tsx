@@ -40,7 +40,9 @@ export default function RoundPage() {
   const effectiveSelectedPlayer = roundPlayers.includes(selectedPlayer) ? selectedPlayer : roundPlayers[0];
   const mode = tripState.roundEntryMode[round.id];
   const liveState = tripState.roundLive[round.id];
-  const canEnterAnyTeamCard = round.teeTimes.some((_, idx) => canUseTeamEntry(session, round.id, idx));
+  const canEnterAnyTeamCard = round.teeTimes.some((_, idx) =>
+    canUseTeamEntry(session, round.id, idx, tripState.teamDelegateAssignments[round.id]?.[idx]),
+  );
   const allowTeamModeToggle = [2, 3, 4].includes(round.id) && session.role === "admin";
   const hasRoundData =
     roundPlayers.some((player) => tripState.individualScores[round.id][player].some((score) => score !== "")) ||

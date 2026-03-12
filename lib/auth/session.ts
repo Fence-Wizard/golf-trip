@@ -13,10 +13,15 @@ export function canViewPlayerCard(session: SessionState, playerName: string): bo
   return session.player === playerName;
 }
 
-export function canUseTeamEntry(session: SessionState, roundId: number, teamIndex: number): boolean {
+export function canUseTeamEntry(
+  session: SessionState,
+  roundId: number,
+  teamIndex: number,
+  delegateOverride?: string | null,
+): boolean {
   if (!session.player || !session.role) return false;
   if (session.role === "admin") return true;
-  const [captain, delegate] = getTeamScorers(roundId, teamIndex);
+  const [captain, delegate] = getTeamScorers(roundId, teamIndex, delegateOverride);
   return session.player === captain || session.player === delegate;
 }
 

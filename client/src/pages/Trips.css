@@ -1,0 +1,22 @@
+.trips-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1.5rem;
+}
+
+.trips-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 1.5rem;
+}
+
+.status-msg {
+  color: var(--text-mid);
+  padding: 2rem 0;
+  text-align: center;
+}
+
+.status-msg.error {
+  color: #c0392b;
+}

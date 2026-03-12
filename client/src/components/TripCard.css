@@ -1,0 +1,29 @@
+.trip-card {
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+
+.trip-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 6px 18px rgba(0,0,0,0.12);
+}
+
+.trip-card__name {
+  font-size: 1.15rem;
+  margin-bottom: 0.5rem;
+}
+
+.trip-card__location,
+.trip-card__dates {
+  color: var(--text-mid);
+  font-size: 0.9rem;
+  margin-bottom: 0.25rem;
+}
+
+.trip-card__stats {
+  display: flex;
+  gap: 1rem;
+  margin-top: 0.75rem;
+  font-size: 0.85rem;
+  color: var(--green-mid);
+  font-weight: 600;
+}

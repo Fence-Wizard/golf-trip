@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, Suspense, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ADMIN_PLAYER, players } from "@/lib/trip/config";
 import { useTrip } from "@/components/trip/TripProvider";
@@ -10,7 +10,7 @@ const roles = [
   { id: "admin", label: "Admin" },
 ];
 
-export default function LoginPage() {
+function LoginForm() {
   const [player, setPlayer] = useState(players[0]);
   const [role, setRole] = useState("player");
   const [pin, setPin] = useState("");
@@ -82,5 +82,21 @@ export default function LoginPage() {
         </button>
       </form>
     </div>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="auth-page">
+          <div className="card auth-card">
+            <p className="muted">Loading login…</p>
+          </div>
+        </div>
+      }
+    >
+      <LoginForm />
+    </Suspense>
   );
 }

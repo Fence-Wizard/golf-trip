@@ -1,19 +1,58 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useTrip } from "@/components/trip/TripProvider";
 import { roundTemplates } from "@/lib/trip/config";
 
 const LINKS = [
   { href: "/", label: "Dashboard" },
   { href: "/results", label: "Results" },
+  { href: "/demo", label: "Demo" },
   { href: "/admin", label: "Admin" },
 ];
 
+const DEMO_ROUTES = ["/", "/rounds/1", "/rounds/1/leaderboard", "/results", "/admin", "/login"];
+const DEMO_COPY = [
+  {
+    title: "Step 1: Dashboard",
+    text: "Review status chips, quick access to your scorecard, and where to continue your round.",
+  },
+  {
+    title: "Step 2: Scorecard Entry",
+    text: "Enter hole scores with presets, sequential lock, and skipped-hole guidance.",
+  },
+  {
+    title: "Step 3: Live Leaderboard",
+    text: "See live standings and team/player progress with mobile-friendly cards.",
+  },
+  {
+    title: "Step 4: Results",
+    text: "Review payouts, round winners, and flight outcomes.",
+  },
+  {
+    title: "Step 5: Admin Tools",
+    text: "As Sam admin, confirm courses, assign delegates, and resolve discrepancies.",
+  },
+  {
+    title: "Step 6: Access & Login",
+    text: "Review how players and admin sign in and where to start using the app.",
+  },
+] as const;
+
 export function AppShell({ children }: { children: React.ReactNode }) {
+  const router = useRouter();
   const pathname = usePathname();
-  const { session, tripState, logout } = useTrip();
+  const {
+    session,
+    tripState,
+    demoMode,
+    demoStep,
+    previousDemoStep,
+    setDemoStep,
+    endDemoMode,
+    logout,
+  } = useTrip();
   const visibleLinks = LINKS.filter((link) => (link.href === "/admin" ? session.role === "admin" : true));
   const today = new Date().toISOString().slice(0, 10);
   const player = session.player ?? "";
@@ -43,6 +82,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const quickHoleQuery =
     quickRound && quickHoleLabel.startsWith("Hole ") ? `?hole=${quickHoleLabel.replace("Hole ", "")}` : "";
   const quickScoreLabel = quickRound ? `My scorecard • ${quickHoleLabel}` : "My scorecard";
+  const demoInfo = DEMO_COPY[Math.max(0, Math.min(DEMO_COPY.length - 1, demoStep))];
+  const demoTarget = DEMO_ROUTES[Math.max(0, Math.min(DEMO_ROUTES.length - 1, demoStep))];
+  const isOnDemoStepRoute = pathname === demoTarget;
 
   return (
     <div className="app-page">
@@ -78,6 +120,45 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </div>
         </div>
       </header>
+      {demoMode ? (
+        <section className="demo-coach card" aria-label="Guided demo instructions">
+          <div className="row-between">
+            <div>
+              <p className="eyebrow">Guided Demo</p>
+              <h3>{demoInfo.title}</h3>
+              <p className="muted">{demoInfo.text}</p>
+            </div>
+            <span className="badge">
+              {demoStep + 1}/{DEMO_COPY.length}
+            </span>
+          </div>
+          <div className="row-wrap">
+            <button type="button" className="button ghost" onClick={previousDemoStep} disabled={demoStep === 0}>
+              Previous
+            </button>
+            {isOnDemoStepRoute ? (
+              <button
+                type="button"
+                className="button"
+                onClick={() => {
+                  const nextStep = Math.min(DEMO_COPY.length - 1, demoStep + 1);
+                  setDemoStep(nextStep);
+                  router.push(DEMO_ROUTES[nextStep]);
+                }}
+              >
+                {demoStep === DEMO_COPY.length - 1 ? "Stay on final step" : "Next step"}
+              </button>
+            ) : (
+              <button type="button" className="button" onClick={() => router.push(demoTarget)}>
+                Go to this step
+              </button>
+            )}
+            <button type="button" className="button ghost" onClick={endDemoMode}>
+              Exit demo
+            </button>
+          </div>
+        </section>
+      ) : null}
       <main className="content">{children}</main>
       {quickRound ? (
         <nav className="mobile-score-dock" aria-label="Quick scoring actions">

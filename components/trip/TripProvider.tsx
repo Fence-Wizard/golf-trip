@@ -38,6 +38,8 @@ interface TripContextValue {
   session: SessionState;
   tripState: TripState;
   isHydrated: boolean;
+  demoMode: boolean;
+  demoStep: number;
   maxStrokesPerHole: number;
   roundSaveStatus: Record<
     number,
@@ -66,6 +68,11 @@ interface TripContextValue {
   undoLastScoreEdit: (roundId: number) => void;
   loadDemoScores: () => void;
   clearDemoScores: () => void;
+  startDemoMode: () => void;
+  endDemoMode: () => void;
+  nextDemoStep: () => void;
+  previousDemoStep: () => void;
+  setDemoStep: (step: number) => void;
   resolveTeamScoreDiscrepancy: (roundId: number, teamIndex: number, holeIndex: number, preferredScorer: "A" | "B") => void;
   setTeamDelegateForRound: (roundId: number, teamIndex: number, delegatePlayer: string) => void;
   scoreTotals: Record<number, Record<string, number>>;
@@ -78,6 +85,8 @@ const TripContext = createContext<TripContextValue | null>(null);
 
 const MAX_STROKES_PER_HOLE = 15;
 const CONFLICT_WINDOW_MS = 45_000;
+const DEMO_DEFAULT_USER = "Todd";
+const DEMO_MAX_STEP = 5;
 
 function toHoleNumber(value: string): number | "" {
   if (value === "") return "";
@@ -90,10 +99,17 @@ function sanitizeRole(role: string): Role {
   return buildRoleFromSelection(role);
 }
 
+function cloneTripState(state: TripState): TripState {
+  return JSON.parse(JSON.stringify(state)) as TripState;
+}
+
 export function TripProvider({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState<SessionState>(getEmptySession);
   const [tripState, setTripState] = useState<TripState>(buildInitialTripState);
   const [isHydrated, setIsHydrated] = useState(false);
+  const [demoMode, setDemoMode] = useState(false);
+  const [demoStep, setDemoStep] = useState(0);
+  const [demoSnapshot, setDemoSnapshot] = useState<{ session: SessionState; tripState: TripState } | null>(null);
   const [dirtyRoundIds, setDirtyRoundIds] = useState<number[]>([]);
   const [roundSaveStatus, setRoundSaveStatus] = useState<
     Record<
@@ -735,10 +751,45 @@ export function TripProvider({ children }: { children: React.ReactNode }) {
     trackEvent("demo_scores_cleared", { by: session.player ?? "unknown" });
   };
 
+  const startDemoMode = () => {
+    setDemoSnapshot((prev) => prev ?? { session: { ...session }, tripState: cloneTripState(tripState) });
+    if (!session.player) {
+      setSession({ player: DEMO_DEFAULT_USER, role: "player" });
+    }
+    loadDemoScores();
+    setDemoStep(0);
+    setDemoMode(true);
+    trackEvent("demo_mode_started", { by: session.player ?? DEMO_DEFAULT_USER });
+  };
+
+  const endDemoMode = () => {
+    if (demoSnapshot) {
+      setTripState(cloneTripState(demoSnapshot.tripState));
+      setSession({ ...demoSnapshot.session });
+      setDemoSnapshot(null);
+      markAllRoundsDirty("Demo mode ended. Restored previous app state.");
+    } else {
+      clearDemoScores();
+    }
+    setDemoStep(0);
+    setDemoMode(false);
+    trackEvent("demo_mode_ended", { by: session.player ?? "unknown" });
+  };
+
+  const nextDemoStep = () => {
+    setDemoStep((prev) => Math.min(DEMO_MAX_STEP, prev + 1));
+  };
+
+  const previousDemoStep = () => {
+    setDemoStep((prev) => Math.max(0, prev - 1));
+  };
+
   const value: TripContextValue = {
     session,
     tripState,
     isHydrated,
+    demoMode,
+    demoStep,
     maxStrokesPerHole: MAX_STROKES_PER_HOLE,
     roundSaveStatus,
     login: (player: string, role: string, pin: string) => {
@@ -920,6 +971,11 @@ export function TripProvider({ children }: { children: React.ReactNode }) {
     undoLastScoreEdit,
     loadDemoScores,
     clearDemoScores,
+    startDemoMode,
+    endDemoMode,
+    nextDemoStep,
+    previousDemoStep,
+    setDemoStep,
     resolveTeamScoreDiscrepancy,
     setTeamDelegateForRound,
     scoreTotals,

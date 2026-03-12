@@ -1,0 +1,33 @@
+services:
+  # Backend API - Node.js/Express
+  - type: web
+    name: golf-trip-api
+    runtime: node
+    rootDir: server
+    buildCommand: npm install && npx prisma generate --schema=../prisma/schema.prisma
+    startCommand: node src/index.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false   # Set this in the Render dashboard from your Neon connection string
+      - key: DIRECT_URL
+        sync: false   # Set this in the Render dashboard from your Neon direct connection string
+      - key: CLIENT_URL
+        sync: false   # Set to your Render static site URL after deploying the client
+
+  # Frontend - React/Vite static site
+  - type: web
+    name: golf-trip-client
+    runtime: static
+    rootDir: client
+    buildCommand: npm install && npm run build
+    staticPublishPath: dist
+    headers:
+      - path: /*
+        name: Cache-Control
+        value: no-cache
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html

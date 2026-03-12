@@ -1,0 +1,34 @@
+.leaderboard-page h1 {
+  margin-bottom: 1.5rem;
+}
+
+.leaderboard-table {
+  overflow-x: auto;
+}
+
+.leaderboard-table table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.leaderboard-table th,
+.leaderboard-table td {
+  padding: 0.75rem 1rem;
+  text-align: left;
+  border-bottom: 1px solid var(--gray-mid);
+}
+
+.leaderboard-table th {
+  background-color: var(--green-dark);
+  color: var(--white);
+  font-weight: 600;
+}
+
+.leaderboard-table tr.leader td {
+  background-color: #fffbea;
+  font-weight: 600;
+}
+
+.leaderboard-table tr:hover td {
+  background-color: var(--gray-light);
+}

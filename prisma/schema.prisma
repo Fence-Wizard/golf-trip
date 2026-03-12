@@ -1,0 +1,65 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model Trip {
+  id        String   @id @default(cuid())
+  name      String
+  location  String
+  startDate DateTime
+  endDate   DateTime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  players Player[] @relation("TripPlayers")
+  rounds  Round[]
+}
+
+model Player {
+  id        String   @id @default(cuid())
+  name      String
+  email     String?  @unique
+  handicap  Float?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  trips  Trip[]  @relation("TripPlayers")
+  scores Score[]
+}
+
+model Round {
+  id           String   @id @default(cuid())
+  date         DateTime
+  courseName   String
+  courseRating Float?
+  slopeRating  Int?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  tripId String
+  trip   Trip   @relation(fields: [tripId], references: [id], onDelete: Cascade)
+
+  scores Score[]
+}
+
+model Score {
+  id        String   @id @default(cuid())
+  hole      Int
+  strokes   Int
+  par       Int?
+  createdAt DateTime @default(now())
+
+  roundId  String
+  round    Round  @relation(fields: [roundId], references: [id], onDelete: Cascade)
+
+  playerId String
+  player   Player @relation(fields: [playerId], references: [id], onDelete: Cascade)
+
+  @@unique([roundId, playerId, hole])
+}

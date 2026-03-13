@@ -5,17 +5,18 @@ import { AppShell } from "@/components/trip/AppShell";
 import { RequireSession } from "@/components/trip/RequireSession";
 import { useTrip } from "@/components/trip/TripProvider";
 import { evaluateCourseIntegrity } from "@/lib/trip/courseIntegrity";
-import { roundTemplates } from "@/lib/trip/config";
+import { buildRuntimeRoundTemplates } from "@/lib/trip/config";
 
-function currentRoundId() {
+function currentRoundId(rounds: ReturnType<typeof buildRuntimeRoundTemplates>) {
   const now = new Date().toISOString().slice(0, 10);
-  return roundTemplates.find((round) => round.date >= now)?.id ?? roundTemplates[0].id;
+  return rounds.find((round) => round.date >= now)?.id ?? rounds[0].id;
 }
 
 export default function Home() {
   const { session, tripState } = useTrip();
-  const activeRoundId = currentRoundId();
-  const activeRound = roundTemplates.find((round) => round.id === activeRoundId) ?? roundTemplates[0];
+  const runtimeRounds = buildRuntimeRoundTemplates(tripState.roundGroupings);
+  const activeRoundId = currentRoundId(runtimeRounds);
+  const activeRound = runtimeRounds.find((round) => round.id === activeRoundId) ?? runtimeRounds[0];
   const myTeeTime =
     activeRound.teeTimes.find((group) => group.players.includes(session.player ?? ""))?.time ?? "Not assigned";
   const integrity = evaluateCourseIntegrity(tripState.courseDataPublished[activeRound.id], activeRound);
@@ -104,7 +105,7 @@ export default function Home() {
         <section className="card">
           <h3>All rounds</h3>
           <div className="round-grid">
-            {roundTemplates.map((round) => (
+            {runtimeRounds.map((round) => (
               <Link key={round.id} href={`/rounds/${round.id}`} className="inner-card hoverable">
                 <p className="eyebrow">{round.name}</p>
                 <p>{round.course}</p>

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useTrip } from "@/components/trip/TripProvider";
-import { roundTemplates } from "@/lib/trip/config";
+import { buildRuntimeRoundTemplates } from "@/lib/trip/config";
 
 const LINKS = [
   { href: "/", label: "Dashboard" },
@@ -56,7 +56,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const visibleLinks = LINKS.filter((link) => (link.href === "/admin" ? session.role === "admin" : true));
   const today = new Date().toISOString().slice(0, 10);
   const player = session.player ?? "";
-  const myRounds = roundTemplates.filter((round) => round.teeTimes.some((group) => group.players.includes(player)));
+  const runtimeRounds = buildRuntimeRoundTemplates(tripState.roundGroupings);
+  const myRounds = runtimeRounds.filter((round) => round.teeTimes.some((group) => group.players.includes(player)));
   const liveMyRound = myRounds
     .filter((round) => tripState.roundLive[round.id]?.isStarted)
     .sort(

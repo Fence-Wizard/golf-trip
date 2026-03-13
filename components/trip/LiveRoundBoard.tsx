@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useTrip } from "@/components/trip/TripProvider";
-import { roundTemplates } from "@/lib/trip/config";
+import { buildRuntimeRoundTemplates } from "@/lib/trip/config";
 import { scoreTeamCards } from "@/lib/trip/scoring";
 
 function completedHoles(values: Array<number | "">): number {
@@ -11,7 +11,8 @@ function completedHoles(values: Array<number | "">): number {
 
 export function LiveRoundBoard({ roundId }: { roundId: number }) {
   const { tripState, scoreTotals, session } = useTrip();
-  const round = roundTemplates.find((r) => r.id === roundId) ?? roundTemplates[0];
+  const runtimeRounds = useMemo(() => buildRuntimeRoundTemplates(tripState.roundGroupings), [tripState.roundGroupings]);
+  const round = runtimeRounds.find((r) => r.id === roundId) ?? runtimeRounds[0];
   const isTeamEvent = [2, 3, 4].includes(roundId);
   const entryMode = tripState.roundEntryMode[roundId];
   const [secondsSinceUpdate, setSecondsSinceUpdate] = useState(0);

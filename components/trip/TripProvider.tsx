@@ -10,12 +10,13 @@ import {
   validateRolePin,
 } from "@/lib/auth/session";
 import {
-  buildInitialIndividualScores,
+  ADMIN_PLAYER,
+  buildInitialIndividualScoresForRoster,
   buildInitialRoundLiveState,
   buildInitialTeamEntrySubmissions,
   buildInitialTeamScores,
+  buildRuntimeRoundTemplates,
   getTeamScorers,
-  players,
   roundTemplates,
   seededCourseDataByRound,
 } from "@/lib/trip/config";
@@ -29,6 +30,7 @@ import {
   ScoreEntryMode,
   ScoreEditEvent,
   SessionState,
+  TeeGroup,
   TeamCard,
   TeamScoreDiscrepancy,
   TripState,
@@ -75,6 +77,10 @@ interface TripContextValue {
   setDemoStep: (step: number) => void;
   resolveTeamScoreDiscrepancy: (roundId: number, teamIndex: number, holeIndex: number, preferredScorer: "A" | "B") => void;
   setTeamDelegateForRound: (roundId: number, teamIndex: number, delegatePlayer: string) => void;
+  updatePlayerName: (existingName: string, nextName: string) => void;
+  updateRoundGrouping: (roundId: number, groupIndex: number, nextGroup: TeeGroup) => void;
+  updateFlightMembers: (flightName: string, members: string[]) => void;
+  updatePayoutSetting: (field: "buyIn" | "teamWinPayout" | "flightWinPayout", value: number) => void;
   scoreTotals: Record<number, Record<string, number>>;
   teamResults: ReturnType<typeof buildTeamResults>;
   flightResults: ReturnType<typeof buildFlightResults>;
@@ -137,6 +143,7 @@ export function TripProvider({ children }: { children: React.ReactNode }) {
       | null
     >
   >(() => Object.fromEntries(roundTemplates.map((round) => [round.id, null])));
+  const runtimeRounds = useMemo(() => buildRuntimeRoundTemplates(tripState.roundGroupings), [tripState.roundGroupings]);
 
   useEffect(() => {
     // Hydrate from browser storage after mount to keep SSR and first client render consistent.
@@ -189,17 +196,17 @@ export function TripProvider({ children }: { children: React.ReactNode }) {
   }, [dirtyRoundIds, isHydrated, tripState]);
 
   const scoreTotals = useMemo(
-    () => buildRoundTotals(tripState.individualScores),
-    [tripState.individualScores],
+    () => buildRoundTotals(tripState.individualScores, tripState.roster, runtimeRounds),
+    [runtimeRounds, tripState.individualScores, tripState.roster],
   );
   const teamResults = useMemo(
-    () => buildTeamResults(scoreTotals, tripState.teamScores, tripState.roundEntryMode),
-    [scoreTotals, tripState.teamScores, tripState.roundEntryMode],
+    () => buildTeamResults(scoreTotals, tripState.teamScores, tripState.roundEntryMode, runtimeRounds),
+    [runtimeRounds, scoreTotals, tripState.teamScores, tripState.roundEntryMode],
   );
-  const flightResults = useMemo(() => buildFlightResults(scoreTotals), [scoreTotals]);
+  const flightResults = useMemo(() => buildFlightResults(scoreTotals, tripState.flights), [scoreTotals, tripState.flights]);
   const payoutSummary = useMemo(
-    () => buildPayoutSummary(teamResults, flightResults),
-    [teamResults, flightResults],
+    () => buildPayoutSummary(teamResults, flightResults, tripState.roster, tripState.payoutSettings),
+    [flightResults, teamResults, tripState.payoutSettings, tripState.roster],
   );
 
   const markRoundDirty = (roundId: number, message: string | null = null) => {
@@ -226,7 +233,7 @@ export function TripProvider({ children }: { children: React.ReactNode }) {
     if (!session.player || !session.role) return false;
     if (session.role === "admin") return true;
     const delegateOverride = tripState.teamDelegateAssignments[roundId]?.[teamIndex];
-    const [captain, delegate] = getTeamScorers(roundId, teamIndex, delegateOverride);
+    const [captain, delegate] = getTeamScorers(roundId, teamIndex, delegateOverride, tripState.roundGroupings);
     return session.player === captain || session.player === delegate;
   };
 
@@ -266,7 +273,7 @@ export function TripProvider({ children }: { children: React.ReactNode }) {
     if ([2, 3, 4].includes(roundId) && mode === "team") {
       return currentState.teamScores[roundId].every((team) => team.holeScores.every((score) => score !== ""));
     }
-    const round = roundTemplates.find((item) => item.id === roundId);
+    const round = runtimeRounds.find((item) => item.id === roundId);
     if (!round) return false;
     return round.teeTimes
       .flatMap((group) => group.players)
@@ -399,6 +406,7 @@ export function TripProvider({ children }: { children: React.ReactNode }) {
         roundId,
         teamIndex,
         prev.teamDelegateAssignments[roundId]?.[teamIndex],
+        prev.roundGroupings,
       );
       const previousValue =
         prev.teamEntrySubmissions[roundId]?.[teamIndex]?.[editedBy]?.[holeIndex] ??
@@ -610,7 +618,7 @@ export function TripProvider({ children }: { children: React.ReactNode }) {
 
   const setTeamDelegateForRound = (roundId: number, teamIndex: number, delegatePlayer: string) => {
     if (session.role !== "admin") return;
-    const [captain] = getTeamScorers(roundId, teamIndex, null);
+    const [captain] = getTeamScorers(roundId, teamIndex, null, tripState.roundGroupings);
     const normalizedDelegate = delegatePlayer === captain ? captain : delegatePlayer;
     setTripState((prev) => {
       const nextDelegates = {
@@ -620,7 +628,7 @@ export function TripProvider({ children }: { children: React.ReactNode }) {
           [teamIndex]: normalizedDelegate,
         },
       };
-      const [scorerA, scorerB] = getTeamScorers(roundId, teamIndex, normalizedDelegate);
+      const [scorerA, scorerB] = getTeamScorers(roundId, teamIndex, normalizedDelegate, prev.roundGroupings);
       const existingTeamSubs = prev.teamEntrySubmissions[roundId]?.[teamIndex] ?? {};
       const scorerAScores = existingTeamSubs[scorerA] ?? prev.teamScores[roundId][teamIndex].holeScores.map((v) => v);
       const scorerBScores = existingTeamSubs[scorerB] ?? prev.teamScores[roundId][teamIndex].holeScores.map((v) => v);
@@ -641,6 +649,175 @@ export function TripProvider({ children }: { children: React.ReactNode }) {
       };
     });
     markRoundDirty(roundId, "Team delegate assignment updated.");
+  };
+
+  const updatePlayerName = (existingName: string, nextName: string) => {
+    if (session.role !== "admin") return;
+    const trimmed = nextName.trim();
+    if (!existingName || !trimmed || existingName === trimmed) return;
+    if (existingName === ADMIN_PLAYER && trimmed !== ADMIN_PLAYER) return;
+
+    setTripState((prev) => {
+      if (prev.roster.includes(trimmed)) return prev;
+      const renameKey = (map: Record<string, Array<number | "">>) => {
+        if (!map[existingName]) return map;
+        const nextMap = { ...map, [trimmed]: [...map[existingName]] };
+        delete nextMap[existingName];
+        return nextMap;
+      };
+
+      const nextIndividualScores: TripState["individualScores"] = Object.fromEntries(
+        Object.entries(prev.individualScores).map(([roundId, roundScores]) => [Number(roundId), renameKey(roundScores)]),
+      );
+
+      const nextRoundGroupings = Object.fromEntries(
+        Object.entries(prev.roundGroupings).map(([roundId, groups]) => [
+          Number(roundId),
+          groups.map((group) => ({
+            ...group,
+            players: group.players.map((player) => (player === existingName ? trimmed : player)),
+          })),
+        ]),
+      ) as TripState["roundGroupings"];
+
+      const nextTeamScores = Object.fromEntries(
+        Object.entries(prev.teamScores).map(([roundId, teams]) => [
+          Number(roundId),
+          teams.map((team) => ({
+            ...team,
+            players: team.players.map((player) => (player === existingName ? trimmed : player)),
+          })),
+        ]),
+      ) as TripState["teamScores"];
+
+      const nextFlights = Object.fromEntries(
+        Object.entries(prev.flights).map(([flight, members]) => [
+          flight,
+          members.map((member) => (member === existingName ? trimmed : member)),
+        ]),
+      ) as TripState["flights"];
+
+      const nextDelegates = Object.fromEntries(
+        Object.entries(prev.teamDelegateAssignments).map(([roundId, byTeam]) => [
+          Number(roundId),
+          Object.fromEntries(
+            Object.entries(byTeam).map(([teamIndex, delegate]) => [Number(teamIndex), delegate === existingName ? trimmed : delegate]),
+          ),
+        ]),
+      ) as TripState["teamDelegateAssignments"];
+
+      const nextSubmissions = Object.fromEntries(
+        Object.entries(prev.teamEntrySubmissions).map(([roundId, byTeam]) => [
+          Number(roundId),
+          Object.fromEntries(
+            Object.entries(byTeam).map(([teamIndex, byScorer]) => {
+              const copied = { ...byScorer };
+              if (copied[existingName]) {
+                copied[trimmed] = [...copied[existingName]];
+                delete copied[existingName];
+              }
+              return [Number(teamIndex), copied];
+            }),
+          ),
+        ]),
+      ) as TripState["teamEntrySubmissions"];
+
+      return {
+        ...prev,
+        roster: prev.roster.map((player) => (player === existingName ? trimmed : player)),
+        individualScores: nextIndividualScores,
+        roundGroupings: nextRoundGroupings,
+        teamScores: nextTeamScores,
+        flights: nextFlights,
+        teamDelegateAssignments: nextDelegates,
+        teamEntrySubmissions: nextSubmissions,
+        scoreEditHistory: prev.scoreEditHistory.map((event) => ({
+          ...event,
+          targetId: event.targetId === existingName ? trimmed : event.targetId,
+          editedBy: event.editedBy === existingName ? trimmed : event.editedBy,
+        })),
+        scoreConflicts: prev.scoreConflicts.map((event) => ({
+          ...event,
+          targetId: event.targetId === existingName ? trimmed : event.targetId,
+          previousEditedBy: event.previousEditedBy === existingName ? trimmed : event.previousEditedBy,
+          currentEditedBy: event.currentEditedBy === existingName ? trimmed : event.currentEditedBy,
+        })),
+        teamScoreDiscrepancies: prev.teamScoreDiscrepancies.map((item) => ({
+          ...item,
+          scorerA: item.scorerA === existingName ? trimmed : item.scorerA,
+          scorerB: item.scorerB === existingName ? trimmed : item.scorerB,
+          resolvedBy: item.resolvedBy === existingName ? trimmed : item.resolvedBy,
+        })),
+      };
+    });
+
+    setSession((prev) => (prev.player === existingName ? { ...prev, player: trimmed } : prev));
+    markAllRoundsDirty(`Player updated: ${existingName} -> ${trimmed}`);
+  };
+
+  const updateRoundGrouping = (roundId: number, groupIndex: number, nextGroup: TeeGroup) => {
+    if (session.role !== "admin") return;
+    setTripState((prev) => {
+      const currentGroups = prev.roundGroupings[roundId] ?? [];
+      if (!currentGroups[groupIndex]) return prev;
+      const normalized: TeeGroup = {
+        time: nextGroup.time.trim() || currentGroups[groupIndex].time,
+        players: nextGroup.players.map((player) => player.trim()).filter(Boolean),
+      };
+      const nextGroups = currentGroups.map((group, idx) => (idx === groupIndex ? normalized : group));
+      const nextRoundGroupings = { ...prev.roundGroupings, [roundId]: nextGroups };
+      const nextTeamScoresForRound = (prev.teamScores[roundId] ?? []).map((team, idx) =>
+        idx === groupIndex ? { ...team, players: [...normalized.players] } : team,
+      );
+      const delegateOverride = prev.teamDelegateAssignments[roundId]?.[groupIndex];
+      const [scorerA, scorerB] = getTeamScorers(roundId, groupIndex, delegateOverride, nextRoundGroupings);
+      const existingByScorer = prev.teamEntrySubmissions[roundId]?.[groupIndex] ?? {};
+      return {
+        ...prev,
+        roundGroupings: nextRoundGroupings,
+        teamScores: {
+          ...prev.teamScores,
+          [roundId]: nextTeamScoresForRound,
+        },
+        teamEntrySubmissions: {
+          ...prev.teamEntrySubmissions,
+          [roundId]: {
+            ...(prev.teamEntrySubmissions[roundId] ?? {}),
+            [groupIndex]: {
+              ...existingByScorer,
+              [scorerA]: existingByScorer[scorerA] ?? Array.from({ length: 18 }, () => ""),
+              [scorerB]: existingByScorer[scorerB] ?? Array.from({ length: 18 }, () => ""),
+            },
+          },
+        },
+      };
+    });
+    markRoundDirty(roundId, "Round grouping updated.");
+  };
+
+  const updateFlightMembers = (flightName: string, members: string[]) => {
+    if (session.role !== "admin") return;
+    setTripState((prev) => ({
+      ...prev,
+      flights: {
+        ...prev.flights,
+        [flightName]: members.map((member) => member.trim()).filter(Boolean),
+      },
+    }));
+    markAllRoundsDirty(`Flight ${flightName} updated.`);
+  };
+
+  const updatePayoutSetting = (field: "buyIn" | "teamWinPayout" | "flightWinPayout", value: number) => {
+    if (session.role !== "admin") return;
+    const normalized = Number.isFinite(value) ? Math.max(0, Math.trunc(value)) : 0;
+    setTripState((prev) => ({
+      ...prev,
+      payoutSettings: {
+        ...prev.payoutSettings,
+        [field]: normalized,
+      },
+    }));
+    markAllRoundsDirty("Payout settings updated.");
   };
 
   const markAllRoundsDirty = (message: string | null = null) => {
@@ -666,12 +843,15 @@ export function TripProvider({ children }: { children: React.ReactNode }) {
   };
 
   const loadDemoScores = () => {
-    const nextIndividual = buildInitialIndividualScores();
-    const nextTeam = buildInitialTeamScores();
-    const nextTeamSubmissions = buildInitialTeamEntrySubmissions(tripState.teamDelegateAssignments);
+    const nextIndividual = buildInitialIndividualScoresForRoster(tripState.roster, tripState.roundGroupings);
+    const nextTeam = buildInitialTeamScores(tripState.roundGroupings);
+    const nextTeamSubmissions = buildInitialTeamEntrySubmissions(
+      tripState.teamDelegateAssignments,
+      tripState.roundGroupings,
+    );
     const nowIso = new Date().toISOString();
 
-    for (const round of roundTemplates) {
+    for (const round of runtimeRounds) {
       if ([2, 3, 4].includes(round.id)) {
         nextTeam[round.id] = nextTeam[round.id].map((team, teamIdx) => ({
           ...team,
@@ -687,6 +867,7 @@ export function TripProvider({ children }: { children: React.ReactNode }) {
             round.id,
             teamIdx,
             tripState.teamDelegateAssignments[round.id]?.[teamIdx],
+            tripState.roundGroupings,
           );
           nextTeamSubmissions[round.id][teamIdx][scorerA] = [...team.holeScores];
           nextTeamSubmissions[round.id][teamIdx][scorerB] = [...team.holeScores];
@@ -738,9 +919,9 @@ export function TripProvider({ children }: { children: React.ReactNode }) {
   const clearDemoScores = () => {
     setTripState((prev) => ({
       ...prev,
-      individualScores: buildInitialIndividualScores(),
-      teamScores: buildInitialTeamScores(),
-      teamEntrySubmissions: buildInitialTeamEntrySubmissions(prev.teamDelegateAssignments),
+      individualScores: buildInitialIndividualScoresForRoster(prev.roster, prev.roundGroupings),
+      teamScores: buildInitialTeamScores(prev.roundGroupings),
+      teamEntrySubmissions: buildInitialTeamEntrySubmissions(prev.teamDelegateAssignments, prev.roundGroupings),
       teamScoreDiscrepancies: [],
       roundLive: buildInitialRoundLiveState(),
       scoreEditHistory: [],
@@ -793,7 +974,7 @@ export function TripProvider({ children }: { children: React.ReactNode }) {
     maxStrokesPerHole: MAX_STROKES_PER_HOLE,
     roundSaveStatus,
     login: (player: string, role: string, pin: string) => {
-      if (!players.includes(player)) return false;
+      if (!tripState.roster.includes(player)) return false;
       const normalizedRole = sanitizeRole(role);
       const pinOk = validateRolePin(normalizedRole, pin, player);
       if (!pinOk) return false;
@@ -978,6 +1159,10 @@ export function TripProvider({ children }: { children: React.ReactNode }) {
     setDemoStep,
     resolveTeamScoreDiscrepancy,
     setTeamDelegateForRound,
+    updatePlayerName,
+    updateRoundGrouping,
+    updateFlightMembers,
+    updatePayoutSetting,
     scoreTotals,
     teamResults,
     flightResults,

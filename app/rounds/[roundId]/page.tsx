@@ -9,7 +9,7 @@ import { RequireSession } from "@/components/trip/RequireSession";
 import { TeamScoreEntry } from "@/components/trip/TeamScoreEntry";
 import { useTrip } from "@/components/trip/TripProvider";
 import { canUseTeamEntry } from "@/lib/auth/session";
-import { roundTemplates } from "@/lib/trip/config";
+import { buildRuntimeRoundTemplates } from "@/lib/trip/config";
 
 export default function RoundPage() {
   const params = useParams<{ roundId: string }>();
@@ -20,7 +20,8 @@ export default function RoundPage() {
   const { session, tripState, updateRoundEntryMode, startRoundLive, stopRoundLive } = useTrip();
   const resolvedRoundId = Number(params.roundId) || 1;
   const requestedHole = Math.max(1, Math.min(18, Number(searchParams.get("hole")) || 1));
-  const round = roundTemplates.find((r) => r.id === resolvedRoundId);
+  const runtimeRounds = buildRuntimeRoundTemplates(tripState.roundGroupings);
+  const round = runtimeRounds.find((r) => r.id === resolvedRoundId);
   if (!round) {
     return (
       <RequireSession>
@@ -41,7 +42,7 @@ export default function RoundPage() {
   const mode = tripState.roundEntryMode[round.id];
   const liveState = tripState.roundLive[round.id];
   const canEnterAnyTeamCard = round.teeTimes.some((_, idx) =>
-    canUseTeamEntry(session, round.id, idx, tripState.teamDelegateAssignments[round.id]?.[idx]),
+    canUseTeamEntry(session, round.id, idx, tripState.teamDelegateAssignments[round.id]?.[idx], tripState.roundGroupings),
   );
   const allowTeamModeToggle = [2, 3, 4].includes(round.id) && session.role === "admin";
   const hasRoundData =

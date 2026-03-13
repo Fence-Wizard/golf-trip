@@ -18,10 +18,11 @@ export function canUseTeamEntry(
   roundId: number,
   teamIndex: number,
   delegateOverride?: string | null,
+  roundGroupings?: Record<number, { time: string; players: string[] }[]>,
 ): boolean {
   if (!session.player || !session.role) return false;
   if (session.role === "admin") return true;
-  const [captain, delegate] = getTeamScorers(roundId, teamIndex, delegateOverride);
+  const [captain, delegate] = getTeamScorers(roundId, teamIndex, delegateOverride, roundGroupings);
   return session.player === captain || session.player === delegate;
 }
 

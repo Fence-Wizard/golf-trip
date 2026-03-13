@@ -6,18 +6,22 @@ import {
   roundTemplates,
   TEAM_WIN_PAYOUT,
 } from "@/lib/trip/config";
-import { ScoreEntryMode, TeamCard } from "@/lib/trip/types";
+import { PayoutSettings, RoundTemplate, ScoreEntryMode, TeamCard } from "@/lib/trip/types";
 
 export function sumScores(values: Array<number | "">): number {
   return values.reduce<number>((acc, val) => acc + (Number(val) || 0), 0);
 }
 
-export function buildRoundTotals(individualScores: Record<number, Record<string, Array<number | "">>>) {
+export function buildRoundTotals(
+  individualScores: Record<number, Record<string, Array<number | "">>>,
+  roster: string[] = players,
+  rounds: RoundTemplate[] = roundTemplates,
+) {
   const totals: Record<number, Record<string, number>> = {};
-  for (const round of roundTemplates) {
+  for (const round of rounds) {
     totals[round.id] = {};
-    for (const player of players) {
-      totals[round.id][player] = sumScores(individualScores[round.id][player]);
+    for (const player of roster) {
+      totals[round.id][player] = sumScores(individualScores[round.id]?.[player] ?? []);
     }
   }
   return totals;
@@ -43,8 +47,9 @@ export function buildTeamResults(
   roundTotals: Record<number, Record<string, number>>,
   teamScores: Record<number, TeamCard[]>,
   roundEntryMode: Record<number, ScoreEntryMode>,
+  rounds: RoundTemplate[] = roundTemplates,
 ) {
-  return roundTemplates
+  return rounds
     .filter((r) => [2, 3, 4].includes(r.id))
     .map((round) => {
       const useTeamCards = roundEntryMode[round.id] === "team";
@@ -75,8 +80,8 @@ export function buildTeamResults(
     });
 }
 
-export function buildFlightResults(roundTotals: Record<number, Record<string, number>>) {
-  return Object.entries(flights).map(([flight, members]) => {
+export function buildFlightResults(roundTotals: Record<number, Record<string, number>>, flightMap: Record<string, string[]> = flights) {
+  return Object.entries(flightMap).map(([flight, members]) => {
     const standings = members.map((player) => ({
       player,
       round1: roundTotals[1][player],
@@ -98,10 +103,16 @@ export function buildFlightResults(roundTotals: Record<number, Record<string, nu
 export function buildPayoutSummary(
   teamResults: ReturnType<typeof buildTeamResults>,
   flightResults: ReturnType<typeof buildFlightResults>,
+  roster: string[] = players,
+  payoutSettings: PayoutSettings = {
+    buyIn: BUY_IN,
+    teamWinPayout: TEAM_WIN_PAYOUT,
+    flightWinPayout: FLIGHT_WIN_PAYOUT,
+  },
 ) {
   const teamPayouts: Record<string, number> = {};
   const flightPayouts: Record<string, number> = {};
-  for (const player of players) {
+  for (const player of roster) {
     teamPayouts[player] = 0;
     flightPayouts[player] = 0;
   }
@@ -109,18 +120,18 @@ export function buildPayoutSummary(
   for (const result of teamResults) {
     for (const group of result.groups.filter((g) => g.isWinner)) {
       for (const player of group.players) {
-        teamPayouts[player] += TEAM_WIN_PAYOUT;
+        teamPayouts[player] += payoutSettings.teamWinPayout;
       }
     }
   }
 
   for (const flight of flightResults) {
     for (const row of flight.standings.filter((s) => s.isWinner)) {
-      flightPayouts[row.player] += FLIGHT_WIN_PAYOUT;
+      flightPayouts[row.player] += payoutSettings.flightWinPayout;
     }
   }
 
-  return players
+  return roster
     .map((player) => {
       const total = teamPayouts[player] + flightPayouts[player];
       return {
@@ -128,7 +139,7 @@ export function buildPayoutSummary(
         team: teamPayouts[player],
         flight: flightPayouts[player],
         total,
-        net: total - BUY_IN,
+        net: total - payoutSettings.buyIn,
       };
     })
     .sort((a, b) => b.total - a.total || a.player.localeCompare(b.player));

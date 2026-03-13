@@ -2,8 +2,10 @@ import {
   CoursePublicationState,
   EntryModeByRound,
   HoleData,
+  PayoutSettings,
   RoundLiveState,
   RoundTemplate,
+  TeeGroup,
   TeamDelegateAssignmentsByRound,
   TeamEntrySubmissionsByRound,
   TeamScoresByRound,
@@ -195,6 +197,50 @@ export function buildInitialIndividualScores() {
   return scoreState;
 }
 
+export function buildInitialRoster() {
+  return [...players];
+}
+
+export function buildInitialFlights() {
+  return Object.fromEntries(Object.entries(flights).map(([flight, members]) => [flight, [...members]])) as Record<
+    string,
+    string[]
+  >;
+}
+
+export function buildInitialRoundGroupings(): Record<number, TeeGroup[]> {
+  return Object.fromEntries(
+    roundTemplates.map((round) => [round.id, round.teeTimes.map((group) => ({ time: group.time, players: [...group.players] }))]),
+  ) as Record<number, TeeGroup[]>;
+}
+
+export function buildRuntimeRoundTemplates(roundGroupings: Record<number, TeeGroup[]>): RoundTemplate[] {
+  return roundTemplates.map((round) => ({
+    ...round,
+    teeTimes: roundGroupings[round.id]?.map((group) => ({ time: group.time, players: [...group.players] })) ?? round.teeTimes,
+  }));
+}
+
+export function buildInitialPayoutSettings(): PayoutSettings {
+  return {
+    buyIn: BUY_IN,
+    teamWinPayout: TEAM_WIN_PAYOUT,
+    flightWinPayout: FLIGHT_WIN_PAYOUT,
+  };
+}
+
+export function buildInitialIndividualScoresForRoster(roster: string[], roundGroupings?: Record<number, TeeGroup[]>) {
+  const scoreState: Record<number, Record<string, Array<number | "">>> = {};
+  const rounds = roundGroupings ? buildRuntimeRoundTemplates(roundGroupings) : roundTemplates;
+  for (const round of rounds) {
+    scoreState[round.id] = {};
+    for (const player of roster) {
+      scoreState[round.id][player] = Array.from({ length: 18 }, () => "");
+    }
+  }
+  return scoreState;
+}
+
 export function buildInitialCourseData() {
   const data: Record<number, HoleData[]> = {};
   for (const round of roundTemplates) {
@@ -205,9 +251,10 @@ export function buildInitialCourseData() {
   return data;
 }
 
-export function buildInitialTeamScores(): TeamScoresByRound {
+export function buildInitialTeamScores(roundGroupings?: Record<number, TeeGroup[]>): TeamScoresByRound {
   const data: TeamScoresByRound = {};
-  for (const round of roundTemplates) {
+  const rounds = roundGroupings ? buildRuntimeRoundTemplates(roundGroupings) : roundTemplates;
+  for (const round of rounds) {
     data[round.id] = round.teeTimes.map((group, idx) => ({
       teamName: `Team ${idx + 1}`,
       players: group.players,
@@ -217,30 +264,38 @@ export function buildInitialTeamScores(): TeamScoresByRound {
   return data;
 }
 
-function getCaptainForTeam(roundId: number, teamIndex: number): string {
-  const round = roundTemplates.find((item) => item.id === roundId) ?? roundTemplates[0];
+function getCaptainForTeam(roundId: number, teamIndex: number, roundGroupings?: Record<number, TeeGroup[]>): string {
+  const rounds = roundGroupings ? buildRuntimeRoundTemplates(roundGroupings) : roundTemplates;
+  const round = rounds.find((item) => item.id === roundId) ?? rounds[0];
   const group = round.teeTimes[teamIndex];
   if (!group) return TEAM_CAPTAINS[0];
   const preferredCaptain = TEAM_CAPTAINS[teamIndex] ?? group.players[0];
   return group.players.includes(preferredCaptain) ? preferredCaptain : group.players[0];
 }
 
-export function getTeamScorers(roundId: number, teamIndex: number, delegateOverride?: string | null): [string, string] {
-  const round = roundTemplates.find((item) => item.id === roundId) ?? roundTemplates[0];
+export function getTeamScorers(
+  roundId: number,
+  teamIndex: number,
+  delegateOverride?: string | null,
+  roundGroupings?: Record<number, TeeGroup[]>,
+): [string, string] {
+  const rounds = roundGroupings ? buildRuntimeRoundTemplates(roundGroupings) : roundTemplates;
+  const round = rounds.find((item) => item.id === roundId) ?? rounds[0];
   const group = round.teeTimes[teamIndex];
-  const captain = getCaptainForTeam(roundId, teamIndex);
+  const captain = getCaptainForTeam(roundId, teamIndex, roundGroupings);
   if (!group) return [captain, captain];
   const candidate = delegateOverride && group.players.includes(delegateOverride) ? delegateOverride : null;
   const delegate = candidate && candidate !== captain ? candidate : group.players.find((player) => player !== captain) ?? captain;
   return [captain, delegate];
 }
 
-export function buildInitialTeamDelegates(): TeamDelegateAssignmentsByRound {
+export function buildInitialTeamDelegates(roundGroupings?: Record<number, TeeGroup[]>): TeamDelegateAssignmentsByRound {
   const data: TeamDelegateAssignmentsByRound = {};
-  for (const round of roundTemplates) {
+  const rounds = roundGroupings ? buildRuntimeRoundTemplates(roundGroupings) : roundTemplates;
+  for (const round of rounds) {
     data[round.id] = {};
     for (const [teamIndex] of round.teeTimes.entries()) {
-      const [, delegate] = getTeamScorers(round.id, teamIndex);
+      const [, delegate] = getTeamScorers(round.id, teamIndex, undefined, roundGroupings);
       data[round.id][teamIndex] = delegate;
     }
   }
@@ -249,12 +304,19 @@ export function buildInitialTeamDelegates(): TeamDelegateAssignmentsByRound {
 
 export function buildInitialTeamEntrySubmissions(
   delegateAssignments: TeamDelegateAssignmentsByRound = buildInitialTeamDelegates(),
+  roundGroupings?: Record<number, TeeGroup[]>,
 ): TeamEntrySubmissionsByRound {
   const data: TeamEntrySubmissionsByRound = {};
-  for (const round of roundTemplates) {
+  const rounds = roundGroupings ? buildRuntimeRoundTemplates(roundGroupings) : roundTemplates;
+  for (const round of rounds) {
     data[round.id] = {};
     for (const [teamIndex] of round.teeTimes.entries()) {
-      const [scorerA, scorerB] = getTeamScorers(round.id, teamIndex, delegateAssignments[round.id]?.[teamIndex]);
+      const [scorerA, scorerB] = getTeamScorers(
+        round.id,
+        teamIndex,
+        delegateAssignments[round.id]?.[teamIndex],
+        roundGroupings,
+      );
       data[round.id][teamIndex] = {
         [scorerA]: Array.from({ length: 18 }, () => ""),
         [scorerB]: Array.from({ length: 18 }, () => ""),
@@ -302,6 +364,6 @@ export function buildInitialRoundLiveState(): Record<number, RoundLiveState> {
   return state;
 }
 
-export function findFlight(player: string): string {
-  return Object.entries(flights).find(([, names]) => names.includes(player))?.[0] ?? "-";
+export function findFlight(player: string, flightMap: Record<string, string[]> = flights): string {
+  return Object.entries(flightMap).find(([, names]) => names.includes(player))?.[0] ?? "-";
 }

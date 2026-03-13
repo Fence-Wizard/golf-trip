@@ -6,13 +6,14 @@ import { AppShell } from "@/components/trip/AppShell";
 import { LiveRoundBoard } from "@/components/trip/LiveRoundBoard";
 import { RequireSession } from "@/components/trip/RequireSession";
 import { useTrip } from "@/components/trip/TripProvider";
-import { roundTemplates } from "@/lib/trip/config";
+import { buildRuntimeRoundTemplates } from "@/lib/trip/config";
 
 export default function RoundLeaderboardPage() {
   const params = useParams<{ roundId: string }>();
   const { session, tripState, startRoundLive, stopRoundLive, finalizeRound, reopenRound } = useTrip();
   const resolvedRoundId = Number(params.roundId) || 1;
-  const round = roundTemplates.find((r) => r.id === resolvedRoundId);
+  const runtimeRounds = buildRuntimeRoundTemplates(tripState.roundGroupings);
+  const round = runtimeRounds.find((r) => r.id === resolvedRoundId);
 
   if (!round) {
     return (

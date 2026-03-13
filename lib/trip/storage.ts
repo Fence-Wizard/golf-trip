@@ -1,10 +1,14 @@
 import {
   buildInitialCoursePublication,
   buildInitialCourseData,
+  buildInitialFlights,
+  buildInitialPayoutSettings,
+  buildInitialRoundGroupings,
+  buildInitialRoster,
   buildInitialTeamDelegates,
   getTeamScorers,
   buildInitialTeamEntrySubmissions,
-  buildInitialIndividualScores,
+  buildInitialIndividualScoresForRoster,
   buildInitialRoundLiveState,
   buildInitialRoundEntryModes,
   seededCourseDataByRound,
@@ -17,13 +21,19 @@ import { TripState } from "@/lib/trip/types";
 const TRIP_STORAGE_KEY = "williamsburg_trip_state_v2";
 
 export function buildInitialTripState(): TripState {
+  const roster = buildInitialRoster();
+  const roundGroupings = buildInitialRoundGroupings();
   const published = buildInitialCourseData();
-  const delegates = buildInitialTeamDelegates();
+  const delegates = buildInitialTeamDelegates(roundGroupings);
   return {
-    individualScores: buildInitialIndividualScores(),
-    teamScores: buildInitialTeamScores(),
+    roster,
+    flights: buildInitialFlights(),
+    roundGroupings,
+    payoutSettings: buildInitialPayoutSettings(),
+    individualScores: buildInitialIndividualScoresForRoster(roster, roundGroupings),
+    teamScores: buildInitialTeamScores(roundGroupings),
     teamDelegateAssignments: delegates,
-    teamEntrySubmissions: buildInitialTeamEntrySubmissions(delegates),
+    teamEntrySubmissions: buildInitialTeamEntrySubmissions(delegates, roundGroupings),
     teamScoreDiscrepancies: [],
     courseDataDraft: buildInitialCourseData(),
     courseDataPublished: published,
@@ -50,6 +60,13 @@ function normalizeTripState(raw: Partial<TripState>): TripState {
     },
     scoreEditHistory: raw.scoreEditHistory ?? [],
     scoreConflicts: raw.scoreConflicts ?? [],
+    roster: raw.roster ?? base.roster,
+    flights: raw.flights ?? base.flights,
+    roundGroupings: raw.roundGroupings ?? base.roundGroupings,
+    payoutSettings: {
+      ...base.payoutSettings,
+      ...(raw.payoutSettings ?? {}),
+    },
     teamDelegateAssignments: raw.teamDelegateAssignments ?? base.teamDelegateAssignments,
     teamEntrySubmissions: raw.teamEntrySubmissions ?? base.teamEntrySubmissions,
     teamScoreDiscrepancies: raw.teamScoreDiscrepancies ?? [],
@@ -75,6 +92,21 @@ function normalizeTripState(raw: Partial<TripState>): TripState {
   // Ensure hole objects contain new metadata fields after schema upgrades.
   for (const round of roundTemplates) {
     const roundId = round.id;
+    normalized.roundGroupings[roundId] =
+      normalized.roundGroupings[roundId]?.map((group, idx) => ({
+        time: group.time ?? base.roundGroupings[roundId]?.[idx]?.time ?? "TBD",
+        players:
+          group.players?.length > 0
+            ? group.players.map((player) => String(player))
+            : base.roundGroupings[roundId]?.[idx]?.players ?? [],
+      })) ?? base.roundGroupings[roundId];
+
+    for (const player of normalized.roster) {
+      if (!normalized.individualScores[roundId][player]) {
+        normalized.individualScores[roundId][player] = Array.from({ length: 18 }, () => "");
+      }
+    }
+
     const template = defaultHoleTemplate;
     const seed = seededCourseDataByRound[roundId];
     const reseedDraftPars = seed ? shouldReseedParsFromSeed(normalized.courseDataDraft[roundId] ?? template, seed) : false;
@@ -120,6 +152,7 @@ function normalizeTripState(raw: Partial<TripState>): TripState {
         roundId,
         teamIndex,
         normalized.teamDelegateAssignments[roundId]?.[teamIndex],
+        normalized.roundGroupings,
       );
       const baseTeamSubs = baseRoundSubs[teamIndex] ?? {};
       const currentTeamSubs = normalized.teamEntrySubmissions[roundId][teamIndex] ?? {};

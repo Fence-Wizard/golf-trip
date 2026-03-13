@@ -4,11 +4,12 @@ import Link from "next/link";
 import { AppShell } from "@/components/trip/AppShell";
 import { RequireSession } from "@/components/trip/RequireSession";
 import { useTrip } from "@/components/trip/TripProvider";
-import { roundTemplates } from "@/lib/trip/config";
+import { buildRuntimeRoundTemplates } from "@/lib/trip/config";
 
 export default function ResultsPage() {
   const { teamResults, flightResults, payoutSummary, tripState } = useTrip();
-  const roundPriority = [...roundTemplates]
+  const runtimeRounds = buildRuntimeRoundTemplates(tripState.roundGroupings);
+  const roundPriority = [...runtimeRounds]
     .map((round) => ({ round, live: tripState.roundLive[round.id] }))
     .sort((a, b) => {
       const aLive = a.live?.isStarted ? 1 : 0;
@@ -136,7 +137,13 @@ export default function ResultsPage() {
                           <td>{group.teamName}</td>
                           <td>{group.players.join(", ")}</td>
                           <td>{group.total || "-"}</td>
-                          <td>{group.isWinner ? <span className="winner-pill">Shared winner - $60/player</span> : "-"}</td>
+                          <td>
+                            {group.isWinner ? (
+                              <span className="winner-pill">Shared winner - ${tripState.payoutSettings.teamWinPayout}/player</span>
+                            ) : (
+                              "-"
+                            )}
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -150,7 +157,13 @@ export default function ResultsPage() {
                         <span className="badge">Total {group.total || "-"}</span>
                       </div>
                       <p className="muted">{group.players.join(", ")}</p>
-                      <p>{group.isWinner ? <span className="winner-pill">Shared winner - $60/player</span> : "-"}</p>
+                      <p>
+                        {group.isWinner ? (
+                          <span className="winner-pill">Shared winner - ${tripState.payoutSettings.teamWinPayout}/player</span>
+                        ) : (
+                          "-"
+                        )}
+                      </p>
                     </article>
                   ))}
                 </div>
@@ -186,7 +199,9 @@ export default function ResultsPage() {
                             <td>{row.round1 || "-"}</td>
                             <td>{row.round5 || "-"}</td>
                             <td>{row.combined || "-"}</td>
-                            <td>{row.isWinner ? <span className="winner-pill">Shared winner $120</span> : "-"}</td>
+                            <td>
+                              {row.isWinner ? <span className="winner-pill">Shared winner ${tripState.payoutSettings.flightWinPayout}</span> : "-"}
+                            </td>
                           </tr>
                         ))}
                     </tbody>
@@ -204,7 +219,9 @@ export default function ResultsPage() {
                         <p className="muted">
                           R1 {row.round1 || "-"} | R5 {row.round5 || "-"}
                         </p>
-                        <p>{row.isWinner ? <span className="winner-pill">Shared winner $120</span> : "-"}</p>
+                        <p>
+                          {row.isWinner ? <span className="winner-pill">Shared winner ${tripState.payoutSettings.flightWinPayout}</span> : "-"}
+                        </p>
                       </article>
                     ))}
                 </div>
@@ -223,7 +240,7 @@ export default function ResultsPage() {
                   <th>Team</th>
                   <th>Flight</th>
                   <th>Total Won</th>
-                  <th>Net vs $100</th>
+                  <th>{`Net vs $${tripState.payoutSettings.buyIn}`}</th>
                 </tr>
               </thead>
               <tbody>

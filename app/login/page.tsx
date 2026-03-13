@@ -1,8 +1,8 @@
 "use client";
 
-import { FormEvent, Suspense, useMemo, useState } from "react";
+import { FormEvent, Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ADMIN_PLAYER, players } from "@/lib/trip/config";
+import { ADMIN_PLAYER, buildInitialRoster } from "@/lib/trip/config";
 import { useTrip } from "@/components/trip/TripProvider";
 
 const roles = [
@@ -11,14 +11,22 @@ const roles = [
 ];
 
 function LoginForm() {
-  const [player, setPlayer] = useState(players[0]);
+  const fallbackRoster = buildInitialRoster();
+  const { login, tripState } = useTrip();
+  const roster = tripState.roster.length > 0 ? tripState.roster : fallbackRoster;
+  const [player, setPlayer] = useState(roster[0]);
   const [role, setRole] = useState("player");
   const [pin, setPin] = useState("");
   const [error, setError] = useState("");
-  const { login } = useTrip();
   const router = useRouter();
   const params = useSearchParams();
   const next = useMemo(() => params.get("next") || "/", [params]);
+
+  useEffect(() => {
+    if (!roster.includes(player)) {
+      setPlayer(roster[0]);
+    }
+  }, [player, roster]);
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -45,7 +53,7 @@ function LoginForm() {
           value={player}
           onChange={(e) => setPlayer(e.target.value)}
         >
-          {players.map((name) => (
+          {roster.map((name) => (
             <option key={name} value={name}>
               {name}
             </option>

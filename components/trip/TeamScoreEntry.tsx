@@ -34,8 +34,14 @@ export function TeamScoreEntry({ roundId }: { roundId: number }) {
       <div className="stack-md">
         {teams.map((team, teamIndex) => {
           const delegateOverride = tripState.teamDelegateAssignments[roundId]?.[teamIndex];
-          const [scorerA, scorerB] = getTeamScorers(roundId, teamIndex, delegateOverride);
-          const canEditThisTeam = canUseTeamEntry(session, roundId, teamIndex, delegateOverride);
+          const [scorerA, scorerB] = getTeamScorers(roundId, teamIndex, delegateOverride, tripState.roundGroupings);
+          const canEditThisTeam = canUseTeamEntry(
+            session,
+            roundId,
+            teamIndex,
+            delegateOverride,
+            tripState.roundGroupings,
+          );
           return (
             <div key={team.teamName} className="inner-card">
             <div className="row-between">

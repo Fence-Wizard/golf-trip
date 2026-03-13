@@ -1,12 +1,13 @@
 "use client";
 
-import { players, roundTemplates } from "@/lib/trip/config";
+import { buildRuntimeRoundTemplates } from "@/lib/trip/config";
 import { useTrip } from "@/components/trip/TripProvider";
 
 export function RoundLeaderboard({ roundId }: { roundId: number }) {
-  const { scoreTotals } = useTrip();
-  const round = roundTemplates.find((r) => r.id === roundId) ?? roundTemplates[0];
-  const rows = players
+  const { scoreTotals, tripState } = useTrip();
+  const runtimeRounds = buildRuntimeRoundTemplates(tripState.roundGroupings);
+  const round = runtimeRounds.find((r) => r.id === roundId) ?? runtimeRounds[0];
+  const rows = tripState.roster
     .map((player) => ({
       player,
       total: scoreTotals[roundId][player],

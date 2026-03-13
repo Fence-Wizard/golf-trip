@@ -7,6 +7,12 @@ export interface TeeGroup {
   players: string[];
 }
 
+export interface PayoutSettings {
+  buyIn: number;
+  teamWinPayout: number;
+  flightWinPayout: number;
+}
+
 export interface RoundTemplate {
   id: number;
   name: string;
@@ -112,6 +118,10 @@ export interface TeamScoreDiscrepancy {
 }
 
 export interface TripState {
+  roster: string[];
+  flights: Record<string, string[]>;
+  roundGroupings: Record<number, TeeGroup[]>;
+  payoutSettings: PayoutSettings;
   individualScores: IndividualScoresByRound;
   teamScores: TeamScoresByRound;
   teamDelegateAssignments: TeamDelegateAssignmentsByRound;

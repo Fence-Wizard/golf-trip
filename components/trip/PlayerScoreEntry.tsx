@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useTrip } from "@/components/trip/TripProvider";
-import { findFlight, roundTemplates } from "@/lib/trip/config";
+import { buildRuntimeRoundTemplates, findFlight } from "@/lib/trip/config";
 import { canViewPlayerCard } from "@/lib/auth/session";
 import { sumScores } from "@/lib/trip/scoring";
 
@@ -53,7 +53,8 @@ export function PlayerScoreEntry({
   const [sequentialNotice, setSequentialNotice] = useState<number | null>(null);
   const { session, tripState, updateIndividualHoleScore, undoLastScoreEdit, roundSaveStatus, maxStrokesPerHole } =
     useTrip();
-  const round = roundTemplates.find((r) => r.id === roundId) ?? roundTemplates[0];
+  const runtimeRounds = useMemo(() => buildRuntimeRoundTemplates(tripState.roundGroupings), [tripState.roundGroupings]);
+  const round = runtimeRounds.find((r) => r.id === roundId) ?? runtimeRounds[0];
   const roundCourse = tripState.courseDataPublished[roundId];
   const allowed = canViewPlayerCard(session, selectedPlayer);
   const roundSave = roundSaveStatus[roundId];
@@ -171,7 +172,7 @@ export function PlayerScoreEntry({
           ))}
         </select>
         <p className="muted">
-          Tee time: {playerTime} | Flight: {findFlight(selectedPlayer)}
+          Tee time: {playerTime} | Flight: {findFlight(selectedPlayer, tripState.flights)}
         </p>
         <label className="label row-wrap" htmlFor="sequential-toggle">
           <input

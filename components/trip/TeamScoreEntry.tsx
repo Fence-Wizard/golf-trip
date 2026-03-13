@@ -42,11 +42,44 @@ export function TeamScoreEntry({ roundId, focusTeamIndex = null, forceViewOnly =
       tripState.roundGroupings,
     ),
   );
+  const saveLabel = canEditVisibleTeams
+    ? save?.state === "saving"
+      ? "Saving..."
+      : save?.state === "error"
+        ? "Save issue"
+        : "Saved"
+    : "View only";
+  const saveDetail = canEditVisibleTeams
+    ? save?.state === "error"
+      ? save.message ?? "Please retry."
+      : save?.lastSavedAt
+        ? `Last saved ${new Date(save.lastSavedAt).toLocaleTimeString()}`
+        : "Changes sync automatically."
+    : "Viewing team scorecard only.";
+
+  const handleTeamScoreChange = (teamIndex: number, holeIndex: number, rawValue: string, canEditThisTeam: boolean) => {
+    if (!canEditThisTeam) return;
+    if (rawValue.trim() === "") {
+      updateTeamHoleScore(roundId, teamIndex, holeIndex, "");
+      return;
+    }
+    const numeric = Number(rawValue);
+    if (Number.isNaN(numeric)) return;
+    const holeMax = Math.min(maxStrokesPerHole, (roundCourse[holeIndex]?.par ?? 4) + 2);
+    const clamped = Math.max(1, Math.min(holeMax, Math.trunc(numeric)));
+    updateTeamHoleScore(roundId, teamIndex, holeIndex, String(clamped));
+  };
 
   return (
     <section className="card">
       <div className="card-header">
-        <h2>{focusTeamIndex === null ? "Team Score Entry" : `Team ${focusTeamIndex + 1} scorecard`}</h2>
+        <div className="row-between">
+          <div>
+            <p className="eyebrow">Team scoring</p>
+            <h2>{focusTeamIndex === null ? "Team Score Entry" : `Team ${focusTeamIndex + 1} scorecard`}</h2>
+          </div>
+          <span className="badge">{saveLabel}</span>
+        </div>
       </div>
 
       <p className="muted">
@@ -54,6 +87,12 @@ export function TeamScoreEntry({ roundId, focusTeamIndex = null, forceViewOnly =
           ? "Viewing a team scorecard in read-only mode."
           : "Each team uses two scorers (captain + delegate). Mismatches require review."}
       </p>
+      <div className="row-wrap">
+        <span className="badge">{focusTeamIndex === null ? `${visibleTeamIndexes.length} teams` : "Single team view"}</span>
+        <span className="badge">
+          {openDiscrepancies.length} open {openDiscrepancies.length === 1 ? "discrepancy" : "discrepancies"}
+        </span>
+      </div>
 
       <div className="stack-md">
         {teams.map((team, teamIndex) => {
@@ -63,47 +102,100 @@ export function TeamScoreEntry({ roundId, focusTeamIndex = null, forceViewOnly =
           const canEditThisTeam =
             !forceViewOnly &&
             canUseTeamEntry(session, roundId, teamIndex, delegateOverride, tripState.roundGroupings);
+          const teamSummary = scored.find((group) => group.teamName === team.teamName);
+          const frontScores = team.holeScores.slice(0, 9);
+          const backScores = team.holeScores.slice(9);
+          const frontTotal = frontScores.reduce<number>((sum, value) => (value === "" ? sum : sum + Number(value)), 0);
+          const backTotal = backScores.reduce<number>((sum, value) => (value === "" ? sum : sum + Number(value)), 0);
+
           return (
             <div key={team.teamName} className="inner-card">
               <div className="row-between">
-                <h3>{team.teamName}</h3>
+                <div>
+                  <p className="eyebrow">Team {teamIndex + 1}</p>
+                  <h3>{team.teamName}</h3>
+                </div>
                 <div className="row-wrap">
-                  <span className="badge">{team.players.join(", ")}</span>
-                  <span className="badge">Scorers: {[scorerA, scorerB].join(" + ")}</span>
+                  <span className="badge">Total {teamSummary?.total || "-"}</span>
+                  {teamSummary?.isWinner ? <span className="winner-pill">Leader</span> : null}
+                  <span className="badge">{canEditThisTeam ? "Editable" : "View only"}</span>
                 </div>
               </div>
+
+              <div className="row-wrap">
+                {team.players.map((player) => (
+                  <span key={`${team.teamName}-${player}`} className="badge">
+                    {player}
+                  </span>
+                ))}
+              </div>
+
+              <div className="row-wrap">
+                <span className="badge">Captain {scorerA}</span>
+                <span className="badge">Delegate {scorerB}</span>
+              </div>
+
               {!canEditThisTeam ? (
                 <p className={forceViewOnly ? "muted" : "warning"}>
                   {forceViewOnly ? "Opened from the leaderboard in view-only mode." : "Only assigned scorers for this team can enter this card."}
                 </p>
               ) : null}
-              <div className="grid-holes">
-                {team.holeScores.map((score, holeIndex) => (
-                  <label key={`${team.teamName}-${holeIndex}`} className="hole-input">
-                    <span>H{holeIndex + 1}</span>
-                    <input
-                      className="input"
-                      type="number"
-                      min={1}
-                      max={Math.min(maxStrokesPerHole, (roundCourse[holeIndex]?.par ?? 4) + 2)}
-                      value={score}
-                      disabled={!canEditThisTeam}
-                      aria-label={`Team ${team.teamName} hole ${holeIndex + 1} score`}
-                      onChange={(e) => {
-                        if (!canEditThisTeam) return;
-                        if (e.target.value.trim() === "") {
-                          updateTeamHoleScore(roundId, teamIndex, holeIndex, "");
-                          return;
-                        }
-                        const numeric = Number(e.target.value);
-                        if (Number.isNaN(numeric)) return;
-                        const holeMax = Math.min(maxStrokesPerHole, (roundCourse[holeIndex]?.par ?? 4) + 2);
-                        const clamped = Math.max(1, Math.min(holeMax, Math.trunc(numeric)));
-                        updateTeamHoleScore(roundId, teamIndex, holeIndex, String(clamped));
-                      }}
-                    />
-                  </label>
-                ))}
+
+              <div className="team-score-sections">
+                <div className="stack-sm">
+                  <div className="row-between">
+                    <p className="eyebrow">Front 9</p>
+                    <span className="badge">Total {frontTotal || "-"}</span>
+                  </div>
+                  <div className="grid-holes team-hole-grid">
+                    {frontScores.map((score, holeIndex) => (
+                      <label key={`${team.teamName}-${holeIndex}`} className="hole-input team-hole-input">
+                        <span>
+                          H{holeIndex + 1} • Par {roundCourse[holeIndex]?.par ?? "-"}
+                        </span>
+                        <input
+                          className="input"
+                          type="number"
+                          min={1}
+                          max={Math.min(maxStrokesPerHole, (roundCourse[holeIndex]?.par ?? 4) + 2)}
+                          value={score}
+                          disabled={!canEditThisTeam}
+                          aria-label={`Team ${team.teamName} hole ${holeIndex + 1} score`}
+                          onChange={(e) => handleTeamScoreChange(teamIndex, holeIndex, e.target.value, canEditThisTeam)}
+                        />
+                      </label>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="stack-sm">
+                  <div className="row-between">
+                    <p className="eyebrow">Back 9</p>
+                    <span className="badge">Total {backTotal || "-"}</span>
+                  </div>
+                  <div className="grid-holes team-hole-grid">
+                    {backScores.map((score, idx) => {
+                      const holeIndex = idx + 9;
+                      return (
+                        <label key={`${team.teamName}-${holeIndex}`} className="hole-input team-hole-input">
+                          <span>
+                            H{holeIndex + 1} • Par {roundCourse[holeIndex]?.par ?? "-"}
+                          </span>
+                          <input
+                            className="input"
+                            type="number"
+                            min={1}
+                            max={Math.min(maxStrokesPerHole, (roundCourse[holeIndex]?.par ?? 4) + 2)}
+                            value={score}
+                            disabled={!canEditThisTeam}
+                            aria-label={`Team ${team.teamName} hole ${holeIndex + 1} score`}
+                            onChange={(e) => handleTeamScoreChange(teamIndex, holeIndex, e.target.value, canEditThisTeam)}
+                          />
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
               </div>
             </div>
           );
@@ -150,7 +242,7 @@ export function TeamScoreEntry({ roundId, focusTeamIndex = null, forceViewOnly =
 
       {focusTeamIndex === null ? (
         <div className="table-wrap">
-          <table className="table">
+          <table className="table table-compact">
             <thead>
               <tr>
                 <th>Team</th>
@@ -170,18 +262,25 @@ export function TeamScoreEntry({ roundId, focusTeamIndex = null, forceViewOnly =
           </table>
         </div>
       ) : null}
+
+      <div className="footer-summary-grid">
+        <article className="metric-tile">
+          <p className="eyebrow">Visible cards</p>
+          <p className="metric-value">{visibleTeamIndexes.length}</p>
+        </article>
+        <article className="metric-tile">
+          <p className="eyebrow">Open discrepancies</p>
+          <p className="metric-value">{openDiscrepancies.length}</p>
+        </article>
+        <article className="metric-tile">
+          <p className="eyebrow">Save status</p>
+          <p className="metric-value">{saveLabel}</p>
+          <p className="muted">{saveDetail}</p>
+        </article>
+      </div>
+
       <div className="row-between">
-        <p className="muted">
-          {canEditVisibleTeams
-            ? `Save status: ${
-                save?.state === "saving"
-                  ? "Saving..."
-                  : save?.state === "error"
-                    ? `Error (${save.message ?? "retry"})`
-                    : "Saved"
-              }${save?.lastSavedAt ? ` | Last saved ${new Date(save.lastSavedAt).toLocaleTimeString()}` : ""}`
-            : "Viewing team scorecard only"}
-        </p>
+        <p className="muted">{forceViewOnly ? "Opened from a leaderboard link." : "Assigned scorers can post the official team card."}</p>
         {canEditVisibleTeams ? (
           <button type="button" className="button ghost" onClick={() => undoLastScoreEdit(roundId)}>
             Undo last edit

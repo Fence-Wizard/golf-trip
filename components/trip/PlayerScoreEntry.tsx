@@ -42,6 +42,23 @@ function firstSkippedHole(values: Array<number | "">): number | null {
   return null;
 }
 
+function scoreShapeLabel(shape: ReturnType<typeof scoreShape>) {
+  switch (shape) {
+    case "eagle":
+      return "Eagle or better";
+    case "birdie":
+      return "Birdie";
+    case "par":
+      return "Par";
+    case "bogey":
+      return "Bogey";
+    case "double-bogey":
+      return "Double bogey max";
+    default:
+      return "No score yet";
+  }
+}
+
 export function PlayerScoreEntry({
   roundId,
   selectedPlayer,
@@ -83,6 +100,25 @@ export function PlayerScoreEntry({
   const activeScore = holeScores[activeHoleIndex];
   const activePar = activeHole.par ?? 4;
   const holeMax = Math.min(maxStrokesPerHole, activePar + 2);
+  const playerFlight = findFlight(selectedPlayer, tripState.flights);
+  const activeShape = scoreShape(activeScore, activePar);
+  const scoreToParLabel = scoreToPar > 0 ? `+${scoreToPar}` : `${scoreToPar}`;
+  const saveStatusLabel = canEdit
+    ? roundSave?.state === "saving"
+      ? "Saving..."
+      : roundSave?.state === "error"
+        ? "Save issue"
+        : "Saved"
+    : "View only";
+  const saveStatusDetail = canEdit
+    ? roundSave?.state === "error"
+      ? roundSave.message ?? "Please retry."
+      : roundSave?.lastSavedAt
+        ? `Last saved at ${new Date(roundSave.lastSavedAt).toLocaleTimeString()}`
+        : "Changes sync automatically."
+    : viewingOtherPlayer
+      ? `Viewing ${selectedPlayer}'s scorecard from the leaderboard.`
+      : "This scorecard is currently read-only.";
   const quickScoreOptions: ScorePreset[] = [
     { label: "Eagle", value: Math.max(1, activePar - 2), style: "circle", double: true },
     { label: "Birdie", value: Math.max(1, activePar - 1), style: "circle" },
@@ -90,6 +126,26 @@ export function PlayerScoreEntry({
     { label: "Bogey", value: Math.min(maxStrokesPerHole, activePar + 1), style: "square" },
     { label: "Double", value: holeMax, style: "square", double: true },
   ];
+  const renderHoleButton = (hole: (typeof roundCourse)[number], idx: number) => (
+    <button
+      key={hole.hole}
+      type="button"
+      className={
+        idx === activeHoleIndex
+          ? "hole-pill active"
+          : holeScores[idx] !== ""
+            ? `hole-pill completed ${scoreShape(holeScores[idx], hole.par)}`
+            : holeScores.slice(idx + 1).some((value) => value !== "")
+              ? "hole-pill missed"
+              : "hole-pill"
+      }
+      onClick={() => jumpToHole(idx)}
+      disabled={canEdit ? !canNavigateToHole(idx) : false}
+      aria-disabled={canEdit ? !canNavigateToHole(idx) : false}
+    >
+      {hole.hole}
+    </button>
+  );
 
   useEffect(() => {
     setActiveHoleIndex(Math.max(0, Math.min(17, initialHoleIndex)));
@@ -172,15 +228,19 @@ export function PlayerScoreEntry({
   return (
     <section className="card">
       <div className="card-header">
-        <h2>{round.name} scorecard</h2>
+        <div className="row-between">
+          <div>
+            <p className="eyebrow">{canEdit ? "Live score entry" : "Scorecard view"}</p>
+            <h2>{round.name} scorecard</h2>
+          </div>
+          <span className="badge">{saveStatusLabel}</span>
+        </div>
       </div>
 
-      <div className="stack-sm">
+      <div className="scorecard-summary-grid">
         {canSelectPlayer ? (
-          <>
-            <label className="label" htmlFor="player-select">
-              Player
-            </label>
+          <label className="metric-tile" htmlFor="player-select">
+            <span className="eyebrow">Player</span>
             <select
               id="player-select"
               className="input"
@@ -193,25 +253,41 @@ export function PlayerScoreEntry({
                 </option>
               ))}
             </select>
-          </>
+            <span className="muted">Choose any player card for admin review.</span>
+          </label>
         ) : (
-          <div className="inner-card">
+          <article className="metric-tile">
             <p className="eyebrow">{viewingOtherPlayer ? "Viewing scorecard" : "Player"}</p>
-            <strong>{selectedPlayer}</strong>
-          </div>
+            <p className="metric-value">{selectedPlayer}</p>
+            <p className="muted">{viewingOtherPlayer ? "Leaderboard-linked read-only card." : "Your live player card."}</p>
+          </article>
         )}
-        <p className="muted">
-          Tee time: {playerTime} | Flight: {findFlight(selectedPlayer, tripState.flights)}
-        </p>
-        <div className="row-wrap">
-          <span className="badge">Front 9: {frontComplete}/9</span>
-          <span className="badge">Back 9: {backComplete}/9</span>
-          <span className="badge">
-            To par: {scoreToPar > 0 ? `+${scoreToPar}` : scoreToPar}
-          </span>
-        </div>
-        {canEdit ? (
-          <>
+        <article className="metric-tile">
+          <p className="eyebrow">Tee time</p>
+          <p className="metric-value">{playerTime}</p>
+          <p className="muted">Flight {playerFlight}</p>
+        </article>
+        <article className="metric-tile">
+          <p className="eyebrow">Progress</p>
+          <p className="metric-value">{holesCompleted}/18</p>
+          <p className="muted">
+            Front {frontComplete}/9 • Back {backComplete}/9
+          </p>
+        </article>
+        <article className="metric-tile">
+          <p className="eyebrow">To par</p>
+          <p className="metric-value">{scoreToParLabel}</p>
+          <p className="muted">{firstUnscoredIndex === -1 ? "Card complete." : `Next open hole: ${firstUnscoredIndex + 1}`}</p>
+        </article>
+      </div>
+
+      {canEdit ? (
+        <div className="inner-card scorecard-settings">
+          <div className="row-between">
+            <div>
+              <p className="eyebrow">Scoring flow</p>
+              <p className="metric-value">{enforceSequential ? "Sequential lock on" : "Free hole navigation"}</p>
+            </div>
             <label className="label row-wrap" htmlFor="sequential-toggle">
               <input
                 id="sequential-toggle"
@@ -221,27 +297,42 @@ export function PlayerScoreEntry({
               />
               Enforce sequential scoring
             </label>
-            {enforceSequential ? <span className="badge">Sequential lock on</span> : null}
-            <p className="muted">Scores auto-advance to the next hole so you can keep moving like a live golf app.</p>
-          </>
-        ) : (
-          <p className="warning">
-            {viewingOtherPlayer
-              ? `Viewing ${selectedPlayer}'s scorecard in read-only mode.`
-              : "This scorecard is currently read-only."}
-          </p>
-        )}
-      </div>
+          </div>
+          <p className="muted">Scores auto-advance to the next hole so the card feels closer to a live golf app flow.</p>
+        </div>
+      ) : (
+        <p className="warning">{saveStatusDetail}</p>
+      )}
 
       <div className="stack-md">
-        <div className="inner-card mobile-scorecard">
+        <div className="inner-card mobile-scorecard active-hole-card">
           <div className="row-between">
-            <strong>
-              Hole {activeHole.hole} / 18
-            </strong>
-            <span className="badge">
-              Par {activeHole.par ?? "-"} | {activeHole.yardage ?? "-"} yds
-            </span>
+            <div>
+              <p className="eyebrow">Active hole</p>
+              <h3>
+                Hole {activeHole.hole} of 18
+              </h3>
+            </div>
+            <span className="badge">{scoreShapeLabel(activeShape)}</span>
+          </div>
+
+          <div className="metric-grid hole-facts-grid">
+            <article className="metric-tile">
+              <p className="eyebrow">Par</p>
+              <p className="metric-value">{activeHole.par ?? "-"}</p>
+            </article>
+            <article className="metric-tile">
+              <p className="eyebrow">Yardage</p>
+              <p className="metric-value">{activeHole.yardage ?? "-"}</p>
+            </article>
+            <article className="metric-tile">
+              <p className="eyebrow">Handicap</p>
+              <p className="metric-value">{activeHole.handicapIndex ?? "-"}</p>
+            </article>
+            <article className="metric-tile">
+              <p className="eyebrow">Hole max</p>
+              <p className="metric-value">{holeMax}</p>
+            </article>
           </div>
 
           <div className="score-center">
@@ -259,6 +350,7 @@ export function PlayerScoreEntry({
               aria-label={`Score for hole ${activeHole.hole}`}
               disabled={!canEdit}
             />
+            <p className="muted center-text">Double bogey max is enforced at {holeMax} on this hole.</p>
             {canEdit ? (
               <div className="quick-score-row" role="group" aria-label="Quick score actions">
                 {quickScoreOptions.map((scoreOption) => (
@@ -331,33 +423,45 @@ export function PlayerScoreEntry({
           </div>
         </div>
 
-        <div className="hole-jump-strip" aria-label="Jump to hole">
-          {roundCourse.map((hole, idx) => (
-            <button
-              key={hole.hole}
-              type="button"
-              className={
-                idx === activeHoleIndex
-                  ? "hole-pill active"
-                  : holeScores[idx] !== ""
-                    ? `hole-pill completed ${scoreShape(holeScores[idx], hole.par)}`
-                    : holeScores.slice(idx + 1).some((value) => value !== "")
-                      ? "hole-pill missed"
-                      : "hole-pill"
-              }
-              onClick={() => jumpToHole(idx)}
-              disabled={canEdit ? !canNavigateToHole(idx) : false}
-              aria-disabled={canEdit ? !canNavigateToHole(idx) : false}
-            >
-              {hole.hole}
-            </button>
-          ))}
+        <div className="stack-sm">
+          <div className="hole-strip-section">
+            <div className="row-between">
+              <p className="eyebrow">Front 9</p>
+              <span className="badge">{frontComplete}/9 scored</span>
+            </div>
+            <div className="hole-jump-grid" aria-label="Jump to front nine hole">
+              {roundCourse.slice(0, 9).map((hole, idx) => renderHoleButton(hole, idx))}
+            </div>
+          </div>
+          <div className="hole-strip-section">
+            <div className="row-between">
+              <p className="eyebrow">Back 9</p>
+              <span className="badge">{backComplete}/9 scored</span>
+            </div>
+            <div className="hole-jump-grid" aria-label="Jump to back nine hole">
+              {roundCourse.slice(9).map((hole, idx) => renderHoleButton(hole, idx + 9))}
+            </div>
+          </div>
         </div>
       </div>
 
       <div className="sticky-round-footer">
+        <div className="footer-summary-grid">
+          <article className="metric-tile">
+            <p className="eyebrow">Total</p>
+            <p className="metric-value">{playerTotal || 0}</p>
+          </article>
+          <article className="metric-tile">
+            <p className="eyebrow">Completed</p>
+            <p className="metric-value">{holesCompleted}/18</p>
+          </article>
+          <article className="metric-tile">
+            <p className="eyebrow">Status</p>
+            <p className="metric-value">{saveStatusLabel}</p>
+            <p className="muted">{saveStatusDetail}</p>
+          </article>
+        </div>
         <div className="row-between">
-          <p className="total">Total: {playerTotal || 0}</p>
           {canEdit ? (
             <button type="button" className="button ghost" onClick={() => undoLastScoreEdit(roundId)}>
               Undo last edit
@@ -366,18 +470,6 @@ export function PlayerScoreEntry({
             <span className="badge">View only</span>
           )}
         </div>
-        <p className="muted">
-          Holes completed: {holesCompleted}/18 |{" "}
-          {canEdit
-            ? `Save status: ${
-                roundSave?.state === "saving"
-                  ? "Saving..."
-                  : roundSave?.state === "error"
-                    ? `Error (${roundSave.message ?? "retry"})`
-                    : "Saved"
-              }${roundSave?.lastSavedAt ? ` | Last saved at ${new Date(roundSave.lastSavedAt).toLocaleTimeString()}` : ""}`
-            : "Viewing another golfer's card"}
-        </p>
       </div>
       {canEdit && celebration ? (
         <div className={`score-celebration-overlay ${celebration.type}`} aria-hidden="true">

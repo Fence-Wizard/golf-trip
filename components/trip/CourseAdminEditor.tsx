@@ -27,6 +27,12 @@ export function CourseAdminEditor({ roundId }: CourseAdminEditorProps) {
   const totals = useMemo(() => splitFrontBack(holes), [holes]);
   const integrity = useMemo(() => evaluateCourseIntegrity(holes, round), [holes, round]);
   const isReadOnly = publication.isLocked;
+  const publishRisks = [
+    integrity.completeHoles < 18 ? "Some holes are still missing par, yardage, or handicap data." : null,
+    integrity.confirmedHoles < 18 ? "Not every hole is admin-verified yet." : null,
+    !integrity.yardageMatchesRoundTotal ? "Published yardage does not match the expected white-tee total." : null,
+    integrity.duplicateHandicapIndexes > 0 ? "Handicap indexes include duplicates." : null,
+  ].filter((risk): risk is string => Boolean(risk));
 
   return (
     <section className="card">
@@ -80,6 +86,16 @@ export function CourseAdminEditor({ roundId }: CourseAdminEditorProps) {
         <p className={integrity.duplicateHandicapIndexes > 0 ? "warning" : "muted"}>
           Handicap indexes duplicates: {integrity.duplicateHandicapIndexes}
         </p>
+        {publishRisks.length > 0 ? (
+          <div className="warning">
+            <strong>Publish checklist</strong>
+            {publishRisks.map((risk) => (
+              <p key={risk}>{risk}</p>
+            ))}
+          </div>
+        ) : (
+          <p className="muted">Publish checklist clear. Course data is ready for a confident admin publish.</p>
+        )}
       </div>
 
       <div className="totals-grid">

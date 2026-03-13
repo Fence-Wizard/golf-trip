@@ -28,11 +28,16 @@ function LoginForm() {
     }
   }, [player, roster]);
 
-  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const ok = login(player, role, pin);
+    setError("");
+    const ok = await login(player, role, pin);
     if (!ok) {
-      setError("Admin access is only for Sam (valid admin PIN required if configured).");
+      setError(
+        role === "admin"
+          ? "Admin access is only for Sam and requires the correct server-side admin PIN when configured."
+          : "Unable to start your session. Please try again.",
+      );
       return;
     }
     router.push(next);

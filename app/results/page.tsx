@@ -1,14 +1,16 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { AppShell } from "@/components/trip/AppShell";
 import { RequireSession } from "@/components/trip/RequireSession";
 import { useTrip } from "@/components/trip/TripProvider";
-import { buildRuntimeRoundTemplates } from "@/lib/trip/config";
+import { buildRuntimeRoundTemplates, findFlight } from "@/lib/trip/config";
 
 export default function ResultsPage() {
-  const { teamResults, flightResults, payoutSummary, tripState } = useTrip();
+  const { teamResults, flightResults, payoutSummary, tripState, scoreTotals } = useTrip();
   const runtimeRounds = buildRuntimeRoundTemplates(tripState.roundGroupings);
+  const [selectedPlayer, setSelectedPlayer] = useState<string | null>(payoutSummary[0]?.player ?? null);
   const roundPriority = [...runtimeRounds]
     .map((round) => ({ round, live: tripState.roundLive[round.id] }))
     .sort((a, b) => {
@@ -52,6 +54,17 @@ export default function ResultsPage() {
     })
     .filter((row): row is { flight: string; margin: number } => Boolean(row))
     .sort((a, b) => a.margin - b.margin)[0];
+  const selectedPlayerSummary = selectedPlayer
+    ? {
+        player: selectedPlayer,
+        flight: findFlight(selectedPlayer, tripState.flights),
+        payout: payoutSummary.find((row) => row.player === selectedPlayer) ?? null,
+        rounds: runtimeRounds.map((round) => ({
+          round,
+          total: scoreTotals[round.id]?.[selectedPlayer] ?? 0,
+        })),
+      }
+    : null;
 
   return (
     <RequireSession>
@@ -105,6 +118,37 @@ export default function ResultsPage() {
             <span className="badge">Total paid out: ${totalPaidOut}</span>
           </div>
         </section>
+
+        {selectedPlayerSummary ? (
+          <section className="card">
+            <div className="row-between">
+              <div>
+                <p className="eyebrow">Player Drilldown</p>
+                <h2>{selectedPlayerSummary.player}</h2>
+              </div>
+              <div className="row-wrap">
+                <span className="badge">Flight {selectedPlayerSummary.flight}</span>
+                <span className="badge">
+                  Net {selectedPlayerSummary.payout ? `${selectedPlayerSummary.payout.net >= 0 ? "+" : ""}$${selectedPlayerSummary.payout.net}` : "-"}
+                </span>
+              </div>
+            </div>
+            <div className="round-grid">
+              {selectedPlayerSummary.rounds.map((item) => (
+                <article key={`player-summary-${item.round.id}`} className="inner-card">
+                  <p className="eyebrow">{item.round.name}</p>
+                  <strong>{item.total || "-"}</strong>
+                  <p className="muted">
+                    {item.round.course} | {item.round.format}
+                  </p>
+                  <Link href={`/rounds/${item.round.id}`} className="button ghost">
+                    Open round
+                  </Link>
+                </article>
+              ))}
+            </div>
+          </section>
+        ) : null}
 
         <section id="round-winners" className="card">
           <h2>Round Winners (Rounds 2-4)</h2>
@@ -246,7 +290,11 @@ export default function ResultsPage() {
               <tbody>
                 {payoutSummary.map((row) => (
                   <tr key={row.player}>
-                    <td>{row.player}</td>
+                    <td>
+                      <button type="button" className="button ghost" onClick={() => setSelectedPlayer(row.player)}>
+                        {row.player}
+                      </button>
+                    </td>
                     <td>${row.team}</td>
                     <td>${row.flight}</td>
                     <td>${row.total}</td>
@@ -262,7 +310,9 @@ export default function ResultsPage() {
             {payoutSummary.map((row) => (
               <article key={`payout-mobile-${row.player}`} className="result-mobile-row">
                 <div className="row-between">
-                  <strong>{row.player}</strong>
+                  <button type="button" className="button ghost" onClick={() => setSelectedPlayer(row.player)}>
+                    {row.player}
+                  </button>
                   <strong className={row.net >= 0 ? "positive" : "negative"}>
                     {row.net >= 0 ? "+" : ""}${row.net}
                   </strong>

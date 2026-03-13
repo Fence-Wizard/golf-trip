@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useTrip } from "@/components/trip/TripProvider";
 import { buildRuntimeRoundTemplates } from "@/lib/trip/config";
+import { canUseTeamEntry } from "@/lib/auth/session";
 
 const LINKS = [
   { href: "/", label: "Dashboard" },
@@ -46,6 +47,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const {
     session,
     tripState,
+    storageMode,
     demoMode,
     demoStep,
     previousDemoStep,
@@ -71,8 +73,26 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       .sort((a, b) => a.date.localeCompare(b.date) || a.id - b.id)[0] ?? myRounds[0];
   const quickRound = liveMyRound ?? upcomingMyRound;
   const quickScoreHref = quickRound ? `/rounds/${quickRound.id}` : "/";
+  const quickTeamIndex = quickRound?.teeTimes.findIndex((group) => group.players.includes(player)) ?? -1;
+  const canQuickOpenTeamCard =
+    Boolean(quickRound) &&
+    [2, 3, 4].includes(quickRound.id) &&
+    quickTeamIndex >= 0 &&
+    canUseTeamEntry(
+      session,
+      quickRound.id,
+      quickTeamIndex,
+      tripState.teamDelegateAssignments[quickRound.id]?.[quickTeamIndex],
+      tripState.roundGroupings,
+    );
   const quickHoleLabel = quickRound
     ? (() => {
+        if (canQuickOpenTeamCard) {
+          const teamScores = tripState.teamScores[quickRound.id]?.[quickTeamIndex]?.holeScores ?? [];
+          const nextHoleIndex = teamScores.findIndex((value) => value === "");
+          if (nextHoleIndex === -1) return "Team Complete";
+          return `Team Hole ${nextHoleIndex + 1}`;
+        }
         const scores = tripState.individualScores[quickRound.id]?.[player] ?? [];
         if (scores.length === 0) return tripState.roundLive[quickRound.id]?.isStarted ? "Open" : "Start";
         const nextHoleIndex = scores.findIndex((value) => value === "");
@@ -82,7 +102,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     : "";
   const quickHoleQuery =
     quickRound && quickHoleLabel.startsWith("Hole ") ? `?hole=${quickHoleLabel.replace("Hole ", "")}` : "";
-  const quickScoreLabel = quickRound ? `My scorecard • ${quickHoleLabel}` : "My scorecard";
+  const quickScoreLabel = quickRound
+    ? `${canQuickOpenTeamCard ? "Team scorecard" : "My scorecard"} • ${quickHoleLabel}`
+    : "My scorecard";
   const demoInfo = DEMO_COPY[Math.max(0, Math.min(DEMO_COPY.length - 1, demoStep))];
   const demoTarget = DEMO_ROUTES[Math.max(0, Math.min(DEMO_ROUTES.length - 1, demoStep))];
   const isOnDemoStepRoute = pathname === demoTarget;
@@ -106,16 +128,25 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           ))}
         </nav>
         <div className="session-box">
-          <span className="muted">
-            {session.player ?? "Guest"} {session.role ? `(${session.role})` : ""}
-          </span>
+          <div className="row-wrap">
+            <span className="muted">
+              {session.player ?? "Guest"} {session.role ? `(${session.role})` : ""}
+            </span>
+            <span className="badge">{storageMode === "server" ? "Cloud sync" : "Local mode"}</span>
+          </div>
           <div className="row-wrap">
             {quickRound ? (
               <Link href={`${quickScoreHref}${quickHoleQuery}`} className="button ghost">
                 {quickScoreLabel}
               </Link>
             ) : null}
-            <button type="button" className="button ghost" onClick={logout}>
+            <button
+              type="button"
+              className="button ghost"
+              onClick={() => {
+                void logout();
+              }}
+            >
               Sign out
             </button>
           </div>

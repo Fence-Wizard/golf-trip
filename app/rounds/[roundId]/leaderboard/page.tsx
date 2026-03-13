@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { AppShell } from "@/components/trip/AppShell";
@@ -10,6 +11,7 @@ import { buildRuntimeRoundTemplates } from "@/lib/trip/config";
 
 export default function RoundLeaderboardPage() {
   const params = useParams<{ roundId: string }>();
+  const [confirmFinalize, setConfirmFinalize] = useState(false);
   const { session, tripState, startRoundLive, stopRoundLive, finalizeRound, reopenRound } = useTrip();
   const resolvedRoundId = Number(params.roundId) || 1;
   const runtimeRounds = buildRuntimeRoundTemplates(tripState.roundGroupings);
@@ -33,6 +35,18 @@ export default function RoundLeaderboardPage() {
 
   const liveState = tripState.roundLive[round.id];
   const canFinalize = session.role === "admin";
+  const roundPlayers = round.teeTimes.flatMap((group) => group.players);
+  const incompleteCards =
+    [2, 3, 4].includes(round.id) && tripState.roundEntryMode[round.id] === "team"
+      ? tripState.teamScores[round.id].filter((team) => team.holeScores.some((score) => score === "")).length
+      : roundPlayers.filter((player) => tripState.individualScores[round.id][player].some((score) => score === "")).length;
+  const openDiscrepancies = tripState.teamScoreDiscrepancies.filter(
+    (item) => item.roundId === round.id && item.status === "open",
+  ).length;
+  const finalizeRisks = [
+    incompleteCards > 0 ? `${incompleteCards} card(s) still have unscored holes.` : null,
+    openDiscrepancies > 0 ? `${openDiscrepancies} team discrepancy alert(s) are still unresolved.` : null,
+  ].filter((item): item is string => Boolean(item));
 
   return (
     <RequireSession>
@@ -62,6 +76,14 @@ export default function RoundLeaderboardPage() {
         </section>
 
         <section className="card masters-start">
+          {canFinalize && finalizeRisks.length > 0 ? (
+            <div className="warning">
+              <strong>Finalize checklist</strong>
+              {finalizeRisks.map((risk) => (
+                <p key={risk}>{risk}</p>
+              ))}
+            </div>
+          ) : null}
           <div className="row-wrap">
             {liveState.isStarted ? (
               <button className="button ghost" onClick={() => stopRoundLive(round.id)}>
@@ -73,8 +95,18 @@ export default function RoundLeaderboardPage() {
               </button>
             )}
             {canFinalize && !liveState.isFinalized ? (
-              <button className="button ghost" onClick={() => finalizeRound(round.id)}>
-                Finalize Round
+              <button
+                className="button ghost"
+                onClick={() => {
+                  if (finalizeRisks.length > 0 && !confirmFinalize) {
+                    setConfirmFinalize(true);
+                    return;
+                  }
+                  finalizeRound(round.id);
+                  setConfirmFinalize(false);
+                }}
+              >
+                {finalizeRisks.length > 0 && !confirmFinalize ? "Review finalize risks" : "Finalize Round"}
               </button>
             ) : null}
             {session.role === "admin" && liveState.isFinalized ? (
@@ -83,6 +115,26 @@ export default function RoundLeaderboardPage() {
               </button>
             ) : null}
           </div>
+          {confirmFinalize && finalizeRisks.length > 0 ? (
+            <div className="warning">
+              <p>Finalize anyway? This will lock the round with outstanding checklist items.</p>
+              <div className="row-wrap">
+                <button
+                  type="button"
+                  className="button"
+                  onClick={() => {
+                    finalizeRound(round.id);
+                    setConfirmFinalize(false);
+                  }}
+                >
+                  Finalize anyway
+                </button>
+                <button type="button" className="button ghost" onClick={() => setConfirmFinalize(false)}>
+                  Cancel
+                </button>
+              </div>
+            </div>
+          ) : null}
         </section>
 
         {liveState.isStarted ? (

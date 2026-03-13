@@ -7,7 +7,6 @@ import {
   getEmptySession,
   loadSession,
   saveSession,
-  validateRolePin,
 } from "@/lib/auth/session";
 import {
   ADMIN_PLAYER,
@@ -21,6 +20,13 @@ import {
   seededCourseDataByRound,
 } from "@/lib/trip/config";
 import { buildFlightResults, buildPayoutSummary, buildRoundTotals, buildTeamResults } from "@/lib/trip/scoring";
+import {
+  fetchRemoteTripState,
+  fetchServerSession,
+  loginViaServer,
+  logoutViaServer,
+  saveRemoteTripState,
+} from "@/lib/trip/apiClient";
 import { buildInitialTripState, loadTripState, saveTripState } from "@/lib/trip/storage";
 import { trackEvent } from "@/lib/observability";
 import {
@@ -40,6 +46,7 @@ interface TripContextValue {
   session: SessionState;
   tripState: TripState;
   isHydrated: boolean;
+  storageMode: "local" | "server";
   demoMode: boolean;
   demoStep: number;
   maxStrokesPerHole: number;
@@ -52,8 +59,8 @@ interface TripContextValue {
       lastSavedAt: string | null;
     }
   >;
-  login: (player: string, role: string, pin: string) => boolean;
-  logout: () => void;
+  login: (player: string, role: string, pin: string) => Promise<boolean>;
+  logout: () => Promise<void>;
   updateIndividualHoleScore: (roundId: number, player: string, holeIndex: number, value: string) => boolean;
   updateTeamHoleScore: (roundId: number, teamIndex: number, holeIndex: number, value: string) => boolean;
   updateRoundEntryMode: (roundId: number, mode: ScoreEntryMode, force?: boolean) => void;
@@ -113,6 +120,8 @@ export function TripProvider({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState<SessionState>(getEmptySession);
   const [tripState, setTripState] = useState<TripState>(buildInitialTripState);
   const [isHydrated, setIsHydrated] = useState(false);
+  const [storageMode, setStorageMode] = useState<"local" | "server">("local");
+  const [serverVersion, setServerVersion] = useState<number | null>(null);
   const [demoMode, setDemoMode] = useState(false);
   const [demoStep, setDemoStep] = useState(0);
   const [demoSnapshot, setDemoSnapshot] = useState<{ session: SessionState; tripState: TripState } | null>(null);
@@ -145,12 +154,88 @@ export function TripProvider({ children }: { children: React.ReactNode }) {
   >(() => Object.fromEntries(roundTemplates.map((round) => [round.id, null])));
   const runtimeRounds = useMemo(() => buildRuntimeRoundTemplates(tripState.roundGroupings), [tripState.roundGroupings]);
 
+  const markRoundsSaved = (roundIds: number[]) => {
+    const nowIso = new Date().toISOString();
+    setRoundSaveStatus((prev) => {
+      const next = { ...prev };
+      for (const roundId of roundIds) {
+        next[roundId] = {
+          state: "saved",
+          message: null,
+          unsavedChanges: false,
+          lastSavedAt: nowIso,
+        };
+      }
+      return next;
+    });
+    setDirtyRoundIds((prev) => prev.filter((roundId) => !roundIds.includes(roundId)));
+  };
+
+  const markRoundsError = (roundIds: number[], message: string) => {
+    setRoundSaveStatus((prev) => {
+      const next = { ...prev };
+      for (const roundId of roundIds) {
+        next[roundId] = {
+          ...next[roundId],
+          state: "error",
+          message,
+          unsavedChanges: true,
+        };
+      }
+      return next;
+    });
+  };
+
   useEffect(() => {
+    const localSession = loadSession();
+    const localState = loadTripState();
     // Hydrate from browser storage after mount to keep SSR and first client render consistent.
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setSession(loadSession());
-    setTripState(loadTripState());
-    setIsHydrated(true);
+    setSession(localSession);
+    setTripState(localState);
+
+    let cancelled = false;
+    async function hydrateFromServer() {
+      try {
+        const remoteSession = await fetchServerSession();
+        if (cancelled) return;
+        if (!remoteSession?.player || !remoteSession?.role) {
+          clearSession();
+          setSession(getEmptySession());
+          setStorageMode("local");
+          setServerVersion(null);
+          setIsHydrated(true);
+          return;
+        }
+
+        setSession(remoteSession);
+        saveSession(remoteSession);
+        const remoteState = await fetchRemoteTripState();
+        if (cancelled) return;
+        if (remoteState.ok && remoteState.payload) {
+          setTripState(remoteState.payload.state);
+          saveTripState(remoteState.payload.state);
+          setStorageMode("server");
+          setServerVersion(remoteState.payload.version);
+          setIsHydrated(true);
+          return;
+        }
+
+        setStorageMode("local");
+        setServerVersion(null);
+        setIsHydrated(true);
+      } catch {
+        if (cancelled) return;
+        setStorageMode("local");
+        setServerVersion(null);
+        setIsHydrated(true);
+      }
+    }
+
+    void hydrateFromServer();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -160,40 +245,64 @@ export function TripProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (!isHydrated || dirtyRoundIds.length === 0) return;
+    const pendingRoundIds = [...dirtyRoundIds];
     const timer = window.setTimeout(() => {
-      try {
-        saveTripState(tripState);
-        const nowIso = new Date().toISOString();
-        setRoundSaveStatus((prev) => {
-          const next = { ...prev };
-          for (const roundId of dirtyRoundIds) {
-            next[roundId] = {
-              state: "saved",
-              message: null,
-              unsavedChanges: false,
-              lastSavedAt: nowIso,
-            };
+      void (async () => {
+        try {
+          saveTripState(tripState);
+          if (storageMode === "server" && session.player && session.role && !demoMode) {
+            const remoteSave = await saveRemoteTripState(tripState, serverVersion);
+            if (!remoteSave.ok || !remoteSave.payload) {
+              if (remoteSave.status === 409) {
+                setServerVersion(remoteSave.conflict?.version ?? serverVersion);
+                markRoundsError(pendingRoundIds, "Another device updated the trip. Refresh or reopen to sync.");
+                setDirtyRoundIds((prev) => prev.filter((roundId) => !pendingRoundIds.includes(roundId)));
+                return;
+              }
+              markRoundsError(pendingRoundIds, remoteSave.error ?? "Cloud save failed. Using local draft only.");
+              setDirtyRoundIds((prev) => prev.filter((roundId) => !pendingRoundIds.includes(roundId)));
+              return;
+            }
+
+            saveTripState(remoteSave.payload.state);
+            setServerVersion(remoteSave.payload.version);
           }
-          return next;
-        });
-        setDirtyRoundIds((prev) => prev.filter((roundId) => !dirtyRoundIds.includes(roundId)));
-      } catch {
-        setRoundSaveStatus((prev) => {
-          const next = { ...prev };
-          for (const roundId of dirtyRoundIds) {
-            next[roundId] = {
-              ...next[roundId],
-              state: "error",
-              message: "Save failed. Check connection and retry.",
-              unsavedChanges: true,
-            };
-          }
-          return next;
-        });
-      }
+
+          markRoundsSaved(pendingRoundIds);
+        } catch {
+          markRoundsError(pendingRoundIds, "Save failed. Check connection and retry.");
+        }
+      })();
     }, 350);
     return () => window.clearTimeout(timer);
-  }, [dirtyRoundIds, isHydrated, tripState]);
+  }, [demoMode, dirtyRoundIds, isHydrated, serverVersion, session.player, session.role, storageMode, tripState]);
+
+  useEffect(() => {
+    if (!isHydrated || storageMode !== "server" || !session.player || !session.role || dirtyRoundIds.length > 0 || demoMode) {
+      return;
+    }
+
+    let cancelled = false;
+    const timer = window.setInterval(() => {
+      void (async () => {
+        try {
+          const remote = await fetchRemoteTripState();
+          if (!remote.ok || !remote.payload || cancelled) return;
+          if (serverVersion !== null && remote.payload.version <= serverVersion) return;
+          saveTripState(remote.payload.state);
+          setTripState(remote.payload.state);
+          setServerVersion(remote.payload.version);
+        } catch {
+          // Silent fallback keeps local experience smooth when connectivity drops.
+        }
+      })();
+    }, 10000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [demoMode, dirtyRoundIds.length, isHydrated, serverVersion, session.player, session.role, storageMode]);
 
   const scoreTotals = useMemo(
     () => buildRoundTotals(tripState.individualScores, tripState.roster, runtimeRounds),
@@ -969,22 +1078,40 @@ export function TripProvider({ children }: { children: React.ReactNode }) {
     session,
     tripState,
     isHydrated,
+    storageMode,
     demoMode,
     demoStep,
     maxStrokesPerHole: MAX_STROKES_PER_HOLE,
     roundSaveStatus,
-    login: (player: string, role: string, pin: string) => {
+    login: async (player: string, role: string, pin: string) => {
       if (!tripState.roster.includes(player)) return false;
       const normalizedRole = sanitizeRole(role);
-      const pinOk = validateRolePin(normalizedRole, pin, player);
-      if (!pinOk) return false;
-      setSession({ player, role: normalizedRole });
-      trackEvent("login", { player, role: normalizedRole });
+      const remoteLogin = await loginViaServer(player, normalizedRole, pin);
+      if (!remoteLogin.ok || !remoteLogin.session) return false;
+
+      setSession(remoteLogin.session);
+      saveSession(remoteLogin.session);
+
+      const remoteState = await fetchRemoteTripState().catch(() => null);
+      if (remoteState?.ok && remoteState.payload) {
+        setTripState(remoteState.payload.state);
+        saveTripState(remoteState.payload.state);
+        setStorageMode("server");
+        setServerVersion(remoteState.payload.version);
+      } else {
+        setStorageMode("local");
+        setServerVersion(null);
+      }
+
+      trackEvent("login", { player, role: normalizedRole, storageMode: remoteState?.mode ?? "local" });
       return true;
     },
-    logout: () => {
+    logout: async () => {
+      await logoutViaServer();
       clearSession();
       setSession(getEmptySession());
+      setStorageMode("local");
+      setServerVersion(null);
     },
     updateIndividualHoleScore,
     updateTeamHoleScore,

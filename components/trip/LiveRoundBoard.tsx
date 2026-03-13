@@ -16,7 +16,9 @@ export function LiveRoundBoard({ roundId }: { roundId: number }) {
   const isTeamEvent = [2, 3, 4].includes(roundId);
   const entryMode = tripState.roundEntryMode[roundId];
   const [secondsSinceUpdate, setSecondsSinceUpdate] = useState(0);
+  const [viewFilter, setViewFilter] = useState<"all" | "mine">("all");
   const scoreStamp = tripState.roundLive[roundId].lastScoreUpdateAt;
+  const recentActivity = tripState.scoreEditHistory.filter((event) => event.roundId === roundId).slice(-5).reverse();
 
   const teamRows = useMemo(() => {
     if (!isTeamEvent) return [];
@@ -112,6 +114,8 @@ export function LiveRoundBoard({ roundId }: { roundId: number }) {
     () => [...teamRows].sort((a, b) => (a.total || 999) - (b.total || 999)),
     [teamRows],
   );
+  const visibleTeamRows = viewFilter === "mine" ? sortedTeamRows.filter((row) => row.mine) : sortedTeamRows;
+  const visibleGroupRows = viewFilter === "mine" ? groupRows.filter((group) => group.players.some((player) => player.mine)) : groupRows;
 
   const movement = (name: string, currentRank: number) => {
     const previous = previousRankMap[name];
@@ -126,18 +130,46 @@ export function LiveRoundBoard({ roundId }: { roundId: number }) {
           <h3>Live Scoring Board</h3>
           <p className="muted">{isTeamEvent ? "Team view" : "Individual groups"}</p>
         </div>
-        <span className="badge">Round {roundId}</span>
+        <div className="row-wrap">
+          <button
+            type="button"
+            className={`button ${viewFilter === "all" ? "" : "ghost"}`}
+            onClick={() => setViewFilter("all")}
+          >
+            All
+          </button>
+          <button
+            type="button"
+            className={`button ${viewFilter === "mine" ? "" : "ghost"}`}
+            onClick={() => setViewFilter("mine")}
+          >
+            {isTeamEvent ? "My team" : "My group"}
+          </button>
+          <span className="badge">Round {roundId}</span>
+        </div>
       </div>
       <p className="muted">
         Updated {displayedSecondsSinceUpdate}s ago
         {displayedSecondsSinceUpdate >= 120 ? " - feed may be stale." : ""}
       </p>
+      {recentActivity.length > 0 ? (
+        <div className="stack-sm">
+          {recentActivity.map((event) => (
+            <p key={event.id} className="muted">
+              {event.editedBy} posted {event.nextValue || "-"} on Hole {event.holeIndex + 1} for {event.targetId}.
+            </p>
+          ))}
+        </div>
+      ) : null}
       {displayedSecondsSinceUpdate >= 120 ? (
         <p className="warning">No score updates for 2+ minutes. Refresh if players are actively posting scores.</p>
       ) : null}
 
       {isTeamEvent ? (
         <>
+          {viewFilter === "mine" && visibleTeamRows.length === 0 ? (
+            <p className="muted">You are not assigned to a team card for this round, so the full board is shown in the All view.</p>
+          ) : null}
           <div className="table-wrap desktop-only">
             <table className="table">
               <thead>
@@ -150,14 +182,16 @@ export function LiveRoundBoard({ roundId }: { roundId: number }) {
                 </tr>
               </thead>
               <tbody>
-                {sortedTeamRows.map((row, idx) => (
+                {visibleTeamRows.map((row) => {
+                  const currentRank = sortedTeamRows.findIndex((item) => item.name === row.name) + 1;
+                  return (
                   <tr key={row.name} className={row.mine ? "my-row" : ""}>
                     <td>
-                      {idx + 1}
+                      {currentRank}
                       <span className="rank-move">
-                        {movement(row.name, idx + 1) === "up"
+                        {movement(row.name, currentRank) === "up"
                           ? " ▲"
-                          : movement(row.name, idx + 1) === "down"
+                          : movement(row.name, currentRank) === "down"
                             ? " ▼"
                             : " •"}
                       </span>
@@ -167,18 +201,25 @@ export function LiveRoundBoard({ roundId }: { roundId: number }) {
                     <td>{row.total || "-"}</td>
                     <td>{row.holesLogged}/18</td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
           <div className="mobile-only live-mobile-stack">
-            {sortedTeamRows.map((row, idx) => (
+            {visibleTeamRows.map((row) => {
+              const currentRank = sortedTeamRows.findIndex((item) => item.name === row.name) + 1;
+              return (
               <article key={`mobile-team-${row.name}`} className={`live-mobile-row ${row.mine ? "my-row" : ""}`}>
                 <div className="row-between">
                   <strong>
-                    #{idx + 1} {row.name}
+                    #{currentRank} {row.name}
                     <span className="rank-move">
-                      {movement(row.name, idx + 1) === "up" ? " ▲" : movement(row.name, idx + 1) === "down" ? " ▼" : " •"}
+                      {movement(row.name, currentRank) === "up"
+                        ? " ▲"
+                        : movement(row.name, currentRank) === "down"
+                          ? " ▼"
+                          : " •"}
                     </span>
                   </strong>
                   <span className="badge">Total {row.total || "-"}</span>
@@ -189,12 +230,16 @@ export function LiveRoundBoard({ roundId }: { roundId: number }) {
                   {row.mine ? <span className="badge">Your team</span> : null}
                 </div>
               </article>
-            ))}
+              );
+            })}
           </div>
         </>
       ) : (
         <div className="stack-md">
-          {groupRows.map((group) => (
+          {viewFilter === "mine" && visibleGroupRows.length === 0 ? (
+            <p className="muted">Your group is not available for this round yet. Switch back to All to review the board.</p>
+          ) : null}
+          {visibleGroupRows.map((group) => (
             <div key={group.groupName} className="inner-card">
               <div className="row-between">
                 <strong>{group.groupName}</strong>

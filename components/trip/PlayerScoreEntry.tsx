@@ -65,6 +65,12 @@ export function PlayerScoreEntry({
     [roundId, selectedPlayer, tripState.individualScores],
   );
   const holeScores = tripState.individualScores[roundId][selectedPlayer];
+  const frontComplete = holeScores.slice(0, 9).filter((score) => score !== "").length;
+  const backComplete = holeScores.slice(9, 18).filter((score) => score !== "").length;
+  const scoreToPar = holeScores.reduce<number>((acc, score, idx) => {
+    if (score === "") return acc;
+    return acc + Number(score) - (roundCourse[idx]?.par ?? 0);
+  }, 0);
   const holesCompleted = holeScores.filter((score) => score !== "").length;
   const firstUnscoredIndex = holeScores.findIndex((score) => score === "");
   const activeHole = roundCourse[activeHoleIndex];
@@ -147,6 +153,13 @@ export function PlayerScoreEntry({
       setCelebration({ id, type: "birdie" });
       window.setTimeout(() => setCelebration((prev) => (prev?.id === id ? null : prev)), 2200);
     }
+
+    const nextUnscored = nextScores.findIndex((value, idx) => idx > activeHoleIndex && value === "");
+    if (nextUnscored !== -1) {
+      setActiveHoleIndex(nextUnscored);
+    } else if (activeHoleIndex < 17) {
+      setActiveHoleIndex(Math.min(17, activeHoleIndex + 1));
+    }
   };
 
   return (
@@ -174,6 +187,13 @@ export function PlayerScoreEntry({
         <p className="muted">
           Tee time: {playerTime} | Flight: {findFlight(selectedPlayer, tripState.flights)}
         </p>
+        <div className="row-wrap">
+          <span className="badge">Front 9: {frontComplete}/9</span>
+          <span className="badge">Back 9: {backComplete}/9</span>
+          <span className="badge">
+            To par: {scoreToPar > 0 ? `+${scoreToPar}` : scoreToPar}
+          </span>
+        </div>
         <label className="label row-wrap" htmlFor="sequential-toggle">
           <input
             id="sequential-toggle"
@@ -184,6 +204,7 @@ export function PlayerScoreEntry({
           Enforce sequential scoring
         </label>
         {enforceSequential ? <span className="badge">Sequential lock on</span> : null}
+        <p className="muted">Scores auto-advance to the next hole so you can keep moving like a live golf app.</p>
       </div>
 
       {!allowed ? (

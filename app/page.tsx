@@ -5,7 +5,6 @@ import { AppShell } from "@/components/trip/AppShell";
 import { RequireSession } from "@/components/trip/RequireSession";
 import { useTrip } from "@/components/trip/TripProvider";
 import { canUseTeamEntry } from "@/lib/auth/session";
-import { evaluateCourseIntegrity } from "@/lib/trip/courseIntegrity";
 import { buildRuntimeRoundTemplates } from "@/lib/trip/config";
 
 function currentRoundId(rounds: ReturnType<typeof buildRuntimeRoundTemplates>) {
@@ -14,22 +13,18 @@ function currentRoundId(rounds: ReturnType<typeof buildRuntimeRoundTemplates>) {
 }
 
 export default function Home() {
-  const { session, tripState, storageMode } = useTrip();
+  const { session, tripState } = useTrip();
   const runtimeRounds = buildRuntimeRoundTemplates(tripState.roundGroupings);
   const activeRoundId = currentRoundId(runtimeRounds);
   const activeRound = runtimeRounds.find((round) => round.id === activeRoundId) ?? runtimeRounds[0];
   const myTeeTime =
     activeRound.teeTimes.find((group) => group.players.includes(session.player ?? ""))?.time ?? "Not assigned";
-  const integrity = evaluateCourseIntegrity(tripState.courseDataPublished[activeRound.id], activeRound);
-  const publication = tripState.coursePublication[activeRound.id];
   const liveState = tripState.roundLive[activeRound.id];
   const myGroup = activeRound.teeTimes.find((group) => group.players.includes(session.player ?? ""));
   const myGroupIndex = activeRound.teeTimes.findIndex((group) => group.players.includes(session.player ?? ""));
   const myScores = session.player ? tripState.individualScores[activeRound.id]?.[session.player] ?? [] : [];
   const nextHoleIndex = myScores.findIndex((score) => score === "");
   const commandHole = nextHoleIndex === -1 ? 18 : nextHoleIndex + 1;
-  const commandLabel =
-    nextHoleIndex === -1 ? "View completed card" : liveState.isStarted ? `Resume Hole ${commandHole}` : "Start scoring";
   const teamScoringAccess =
     myGroupIndex >= 0 &&
     [2, 3, 4].includes(activeRound.id) &&
@@ -43,7 +38,6 @@ export default function Home() {
   const openDiscrepancies = tripState.teamScoreDiscrepancies.filter(
     (item) => item.roundId === activeRound.id && item.status === "open",
   ).length;
-  const recentActivity = tripState.scoreEditHistory.filter((item) => item.roundId === activeRound.id).slice(-4).reverse();
   const roundStatus = (roundId: number) => {
     const state = tripState.roundLive[roundId];
     if (state.isFinalized) return "Final";
@@ -54,222 +48,208 @@ export default function Home() {
   const activeStatus = roundStatus(activeRound.id);
   const scoreEntryHref = `/rounds/${activeRound.id}${nextHoleIndex >= 0 ? `?hole=${nextHoleIndex + 1}` : ""}`;
   const leaderboardHref = `/rounds/${activeRound.id}/leaderboard`;
-  const commandDescription = liveState.isStarted
-    ? "Pick up right where you left off and keep scores moving."
-    : "Open the round when your group is ready to start posting scores.";
-  const roundStatusDescription = teamScoringAccess
-    ? "You are one of the assigned scorers for this team round."
-    : [2, 3, 4].includes(activeRound.id)
-      ? "Follow live team updates while the assigned scorers post the official card."
-      : "Post your own card and watch the board update hole by hole.";
-  const alertDescription =
-    openDiscrepancies > 0
-      ? "Review mismatched submissions before the round is finalized."
-      : "No scoring conflicts or delegate issues are blocking play.";
+  const playerName = session.player ?? "Player";
+  const statusDescription = liveState.isFinalized
+    ? "Today's round is complete. You can review the board or check final payouts."
+    : liveState.isStarted
+      ? teamScoringAccess
+        ? "Scoring is live. Open the round to keep the official team card updated."
+        : "Scoring is live. Open the round when you are ready to continue."
+      : liveState.startedAt
+        ? "The round is paused right now, but your card and leaderboard are still available."
+        : "Start here when your tee time arrives. Everything else is available as a shortcut below.";
+  const primaryActionLabel =
+    nextHoleIndex === -1
+      ? "Review my card"
+      : teamScoringAccess && [2, 3, 4].includes(activeRound.id)
+        ? liveState.isStarted
+          ? "Open team scorecard"
+          : "Start team scoring"
+        : liveState.isStarted
+          ? `Continue from Hole ${commandHole}`
+          : "Start my round";
+  const primaryActionDetail =
+    nextHoleIndex === -1
+      ? "Your current card is complete, but you can still review it anytime."
+      : nextHoleIndex >= 0
+        ? `Your next open hole is ${commandHole}.`
+        : "Open the round whenever you are ready.";
+  const shortcuts = [
+    {
+      label: "Leaderboard",
+      href: leaderboardHref,
+    },
+    {
+      label: "Results",
+      href: "/results",
+    },
+    ...(myGroup
+      ? [
+          {
+            label: "My round",
+            href: scoreEntryHref,
+          },
+        ]
+      : []),
+    ...(session.role === "admin"
+      ? [
+          {
+            label: "Admin",
+            href: "/admin",
+          },
+        ]
+      : []),
+  ];
+  const todayDetails = [
+    {
+      label: "Tee time",
+      value: myTeeTime,
+      detail: "Your starting time for today.",
+    },
+    {
+      label: "My group",
+      value: myGroup ? myGroup.players.join(" • ") : "Not assigned",
+      detail: myGroup ? `${myGroup.time} tee time.` : "We will show your foursome here once assigned.",
+    },
+    {
+      label: "Format",
+      value: activeRound.format,
+      detail: activeRound.teeWindow,
+    },
+  ];
+  const showRoundBrowser = session.role === "admin";
 
   return (
     <RequireSession>
       <AppShell>
-        <section className="grid-cards dashboard-top-grid">
-          <article className="card dashboard-hero">
-            <div className="row-between">
+        <section className="card home-hero">
+          <div className="home-hero-grid">
+            <div className="stack-md">
               <div className="stack-sm">
-                <p className="eyebrow">Today</p>
-                <h2>{activeRound.name}</h2>
+                <p className="eyebrow">Start here</p>
+                <h2>Welcome back, {playerName}</h2>
+                <p className="home-hero-copy">
+                  This home page is your starting point for the day. Open your round when you are ready, or use the
+                  shortcuts below if you want to jump somewhere specific.
+                </p>
+              </div>
+              <div className="inner-card">
+                <div className="row-between">
+                  <div>
+                    <p className="eyebrow">Today&apos;s round</p>
+                    <h3>{activeRound.name}</h3>
+                  </div>
+                  <span
+                    className={`status-chip ${
+                      activeStatus === "Final" ? "final" : activeStatus === "Live" ? "live" : activeStatus === "Paused" ? "paused" : "not-started"
+                    }`}
+                  >
+                    {activeStatus}
+                  </span>
+                </div>
                 <p>{activeRound.course}</p>
-                <p className="muted">
-                  {activeRound.format} | {activeRound.teeWindow}
-                </p>
-              </div>
-              <span
-                className={`status-chip ${
-                  activeStatus === "Final" ? "final" : activeStatus === "Live" ? "live" : activeStatus === "Paused" ? "paused" : "not-started"
-                }`}
-              >
-                {activeStatus}
-              </span>
-            </div>
-            <div className="metric-grid">
-              <article className="metric-tile">
-                <p className="eyebrow">Tee time</p>
-                <p className="metric-value">{myTeeTime}</p>
-                <p className="muted">Your first checkpoint for the round.</p>
-              </article>
-              <article className="metric-tile">
-                <p className="eyebrow">Role</p>
-                <p className="metric-value">{session.role === "admin" ? "Admin" : "Player"}</p>
-                <p className="muted">{teamScoringAccess ? "Assigned team scorer today." : "Focused on live viewing and score updates."}</p>
-              </article>
-              <article className="metric-tile">
-                <p className="eyebrow">My group</p>
-                <p className="metric-value">{myGroup?.time ?? "Not assigned"}</p>
-                <p className="muted">{myGroup ? myGroup.players.join(" • ") : "No foursome assigned for this round yet."}</p>
-              </article>
-              <article className="metric-tile">
-                <p className="eyebrow">Course status</p>
-                <p className="metric-value">{publication.isConfirmed ? "Confirmed" : "Needs review"}</p>
-                <p className="muted">
-                  {integrity.confirmedHoles}/18 verified holes • Yardage {integrity.totalYardage}
-                  {integrity.expectedTotalYardage ? `/${integrity.expectedTotalYardage}` : ""}
-                </p>
-              </article>
-            </div>
-          </article>
-
-          <article className="card dashboard-actions">
-            <p className="eyebrow">Next up</p>
-            <h3>{commandLabel}</h3>
-            <p className="muted">{commandDescription}</p>
-            <div className="stack-sm">
-              <Link href={scoreEntryHref} className="button">
-                Open score entry
-              </Link>
-              <Link href={leaderboardHref} className="button ghost">
-                Open leaderboard
-              </Link>
-              <Link href="/results" className="button ghost">
-                View winners and payouts
-              </Link>
-            </div>
-          </article>
-        </section>
-
-        <section className="card">
-          <div className="row-between">
-            <div>
-              <p className="eyebrow">Command Center</p>
-              <h3>{activeRound.name} next actions</h3>
-            </div>
-            <span className="badge">{storageMode === "server" ? "Cloud updates on" : "Local-only mode"}</span>
-          </div>
-          <div className="round-grid">
-            <article className="inner-card">
-              <p className="eyebrow">Your next move</p>
-              <p className="metric-value">{commandLabel}</p>
-              <p className="muted">{commandDescription}</p>
-              <Link href={scoreEntryHref} className="button">
-                Open score entry
-              </Link>
-            </article>
-            <article className="inner-card">
-              <p className="eyebrow">Live round status</p>
-              <p className="metric-value">{activeStatus}</p>
-              <p className="muted">{roundStatusDescription}</p>
-              <Link href={leaderboardHref} className="button ghost">
-                Open leaderboard
-              </Link>
-            </article>
-            <article className="inner-card">
-              <p className="eyebrow">Attention items</p>
-              <p className="metric-value">{openDiscrepancies > 0 ? `${openDiscrepancies} alerts` : "All clear"}</p>
-              <p className="muted">{alertDescription}</p>
-              <Link href={session.role === "admin" ? "/admin" : leaderboardHref} className="button ghost">
-                {session.role === "admin" ? "Review in admin" : "View live updates"}
-              </Link>
-            </article>
-          </div>
-          {recentActivity.length > 0 ? (
-            <div className="stack-sm">
-              <p className="eyebrow">Recent Activity</p>
-              <div className="activity-list">
-                {recentActivity.map((event) => (
-                  <article key={event.id} className="activity-item">
-                    <strong>
-                      {event.targetId} • Hole {event.holeIndex + 1}
-                    </strong>
-                    <p className="muted">
-                      {event.editedBy} updated this card at {new Date(event.timestamp).toLocaleTimeString()}.
-                    </p>
-                  </article>
-                ))}
+                <p className="muted">{statusDescription}</p>
+                <div className="row-wrap">
+                  <span className="badge">Tee time {myTeeTime}</span>
+                  <span className="badge">{activeRound.format}</span>
+                  <span className="badge">{activeRound.teeWindow}</span>
+                </div>
               </div>
             </div>
-          ) : (
-            <p className="muted">No scores posted yet for the active round.</p>
-          )}
+
+            <article className="inner-card home-primary-action">
+              <p className="eyebrow">Next action</p>
+              <h3>{primaryActionLabel}</h3>
+              <p className="muted">{primaryActionDetail}</p>
+              <div className="stack-sm">
+                <Link href={scoreEntryHref} className="button">
+                  {primaryActionLabel}
+                </Link>
+                <Link href={leaderboardHref} className="button ghost">
+                  Open leaderboard
+                </Link>
+                <Link href="/results" className="button ghost">
+                  View results
+                </Link>
+              </div>
+            </article>
+          </div>
         </section>
 
-        <section className="card">
-          <div className="row-between">
-            <div>
-              <p className="eyebrow">Course data</p>
-              <h3>Reliability snapshot</h3>
+        <section className="grid-cards home-summary-grid">
+          <article className="card">
+            <div className="card-header">
+              <p className="eyebrow">Today</p>
+              <h3>What you need</h3>
+              <p className="muted">Only the essentials are shown here.</p>
             </div>
-            <span className="status-chip confirmed">{publication.isConfirmed ? "Confirmed" : "Unconfirmed"}</span>
-          </div>
-          <div className="metric-grid">
-            <article className="metric-tile">
-              <p className="eyebrow">Verified holes</p>
-              <p className="metric-value">
-                {integrity.confirmedHoles}/18
-              </p>
-              <p className="muted">Holes with verified par, yardage, and handicap data.</p>
-            </article>
-            <article className="metric-tile">
-              <p className="eyebrow">Published yardage</p>
-              <p className="metric-value">
-                {integrity.totalYardage}
-                {integrity.expectedTotalYardage ? ` / ${integrity.expectedTotalYardage}` : ""}
-              </p>
-              <p className="muted">Checks the live card against the expected white-tee total.</p>
-            </article>
-            <article className="metric-tile">
-              <p className="eyebrow">Round status</p>
-              <p className="metric-value">{activeStatus}</p>
-              <p className="muted">Useful when checking if scoring and course confirmation are aligned.</p>
-            </article>
-          </div>
-          {!integrity.yardageMatchesRoundTotal ? (
-            <p className="warning">Published yardage does not match expected white-tee total.</p>
-          ) : null}
-        </section>
-
-        {myGroup ? (
-          <section className="card">
-            <p className="eyebrow">My Group</p>
-            <h3>{myGroup.time}</h3>
-            <div className="row-wrap">
-              {myGroup.players.map((player) => (
-                <span key={player} className="badge">
-                  {player}
-                </span>
+            <div className="home-detail-list">
+              {todayDetails.map((detail) => (
+                <article key={detail.label} className="home-detail-row">
+                  <div>
+                    <p className="eyebrow">{detail.label}</p>
+                    <p className="metric-value">{detail.value}</p>
+                  </div>
+                  <p className="muted">{detail.detail}</p>
+                </article>
               ))}
             </div>
-            <Link href={scoreEntryHref} className="button">
-              Open my group round
-            </Link>
+          </article>
+
+          <article className="card">
+            <div className="card-header">
+              <p className="eyebrow">Shortcuts</p>
+              <h3>Optional links</h3>
+              <p className="muted">Use these only if you want to skip ahead.</p>
+            </div>
+            <div className="home-shortcut-buttons">
+              {shortcuts.map((shortcut) => (
+                <Link key={shortcut.label} href={shortcut.href} className="button ghost">
+                  {shortcut.label}
+                </Link>
+              ))}
+            </div>
+          </article>
+        </section>
+
+        {session.role === "admin" && openDiscrepancies > 0 ? (
+          <section className="warning">
+            {openDiscrepancies} scoring {openDiscrepancies === 1 ? "issue needs" : "issues need"} admin review for{" "}
+            {activeRound.name}. <Link href="/admin">Open admin</Link>
           </section>
         ) : null}
 
-        <section className="card">
-          <div className="card-header">
-            <p className="eyebrow">Tournament view</p>
-            <h3>All rounds</h3>
-            <p className="muted">Open any round to jump into its scorecard or follow the leaderboard.</p>
-          </div>
-          <div className="round-grid">
-            {runtimeRounds.map((round) => (
-              <Link key={round.id} href={`/rounds/${round.id}`} className="inner-card hoverable">
-                <p className="eyebrow">{round.name}</p>
-                <p>{round.course}</p>
-                <p className="muted">{round.format}</p>
-                <span
-                  className={`status-chip ${
-                    roundStatus(round.id) === "Final"
-                      ? "final"
-                      : roundStatus(round.id) === "Live"
-                        ? "live"
-                        : roundStatus(round.id) === "Paused"
-                          ? "paused"
-                          : "not-started"
-                  }`}
-                >
-                  {roundStatus(round.id)}
-                </span>
-              </Link>
-            ))}
-          </div>
-        </section>
+        {showRoundBrowser ? (
+          <section className="card">
+            <div className="card-header">
+              <p className="eyebrow">Admin view</p>
+              <h3>Round browser</h3>
+              <p className="muted">This stays visible for admin users who need faster access across the full trip.</p>
+            </div>
+            <div className="round-grid">
+              {runtimeRounds.map((round) => (
+                <Link key={round.id} href={`/rounds/${round.id}`} className="inner-card hoverable">
+                  <p className="eyebrow">{round.name}</p>
+                  <p>{round.course}</p>
+                  <p className="muted">{round.format}</p>
+                  <span
+                    className={`status-chip ${
+                      roundStatus(round.id) === "Final"
+                        ? "final"
+                        : roundStatus(round.id) === "Live"
+                          ? "live"
+                          : roundStatus(round.id) === "Paused"
+                            ? "paused"
+                            : "not-started"
+                    }`}
+                  >
+                    {roundStatus(round.id)}
+                  </span>
+                </Link>
+              ))}
+            </div>
+          </section>
+        ) : null}
       </AppShell>
     </RequireSession>
   );

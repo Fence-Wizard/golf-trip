@@ -146,6 +146,79 @@ a {
   width: 100%;
 }
 
+.home-hero {
+  background: linear-gradient(180deg, #fffefb 0%, #f6f0e2 100%);
+}
+
+.home-hero-grid,
+.home-summary-grid {
+  display: grid;
+  gap: 1rem;
+}
+
+.home-hero-copy {
+  max-width: 44rem;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.home-primary-action {
+  align-content: start;
+  gap: 0.85rem;
+  background: linear-gradient(180deg, #fffefb 0%, #edf5ef 100%);
+}
+
+.home-primary-action .button,
+.home-primary-action .button.ghost {
+  width: 100%;
+}
+
+.home-detail-list {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.home-detail-row {
+  border: 1px solid #d6cab2;
+  border-radius: 16px;
+  padding: 0.85rem 0.9rem;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  background: linear-gradient(180deg, #fffefb 0%, var(--surface-muted) 100%);
+  box-shadow: var(--shadow-soft);
+}
+
+.home-detail-row .muted {
+  max-width: 16rem;
+  text-align: right;
+}
+
+.home-shortcut-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.7rem;
+}
+
+.home-shortcut-buttons .button,
+.home-shortcut-buttons .button.ghost {
+  min-width: 10rem;
+}
+
+.shortcut-grid {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.shortcut-card {
+  align-content: start;
+}
+
+.shortcut-card .button {
+  width: 100%;
+}
+
 .card {
   background: var(--surface);
   border: 1px solid var(--border);
@@ -1061,6 +1134,16 @@ a {
     grid-template-columns: minmax(0, 1.6fr) minmax(280px, 0.9fr);
   }
 
+  .home-hero-grid,
+  .home-summary-grid {
+    grid-template-columns: minmax(0, 1.5fr) minmax(320px, 0.95fr);
+    align-items: start;
+  }
+
+  .shortcut-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .round-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
@@ -1141,6 +1224,28 @@ a {
   .scorecard-summary-grid,
   .footer-summary-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .home-hero-grid,
+  .home-summary-grid,
+  .shortcut-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .home-detail-row {
+    display: grid;
+    gap: 0.45rem;
+  }
+
+  .home-detail-row .muted {
+    max-width: none;
+    text-align: left;
+  }
+
+  .home-shortcut-buttons .button,
+  .home-shortcut-buttons .button.ghost {
+    width: 100%;
+    min-width: 0;
   }
 
   .card h2 {

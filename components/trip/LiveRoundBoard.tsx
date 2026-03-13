@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useTrip } from "@/components/trip/TripProvider";
 import { buildRuntimeRoundTemplates } from "@/lib/trip/config";
@@ -24,6 +25,7 @@ export function LiveRoundBoard({ roundId }: { roundId: number }) {
     if (!isTeamEvent) return [];
     if (entryMode === "team") {
       return scoreTeamCards(tripState.teamScores[roundId]).map((row, idx) => ({
+        teamIndex: idx,
         name: row.teamName,
         players: row.players.join(", "),
         total: row.total,
@@ -33,6 +35,7 @@ export function LiveRoundBoard({ roundId }: { roundId: number }) {
     }
     return round.teeTimes
       .map((group, idx) => ({
+        teamIndex: idx,
         name: `Team ${idx + 1}`,
         players: group.players.join(", "),
         total: group.players.reduce((acc, player) => acc + (scoreTotals[roundId][player] || 0), 0),
@@ -184,6 +187,8 @@ export function LiveRoundBoard({ roundId }: { roundId: number }) {
               <tbody>
                 {visibleTeamRows.map((row) => {
                   const currentRank = sortedTeamRows.findIndex((item) => item.name === row.name) + 1;
+                  const teamHref =
+                    entryMode === "team" ? `/rounds/${roundId}?team=${row.teamIndex + 1}&view=readonly` : null;
                   return (
                   <tr key={row.name} className={row.mine ? "my-row" : ""}>
                     <td>
@@ -196,7 +201,7 @@ export function LiveRoundBoard({ roundId }: { roundId: number }) {
                             : " •"}
                       </span>
                     </td>
-                    <td>{row.name}</td>
+                    <td>{teamHref ? <Link href={teamHref}>{row.name}</Link> : row.name}</td>
                     <td>{row.players}</td>
                     <td>{row.total || "-"}</td>
                     <td>{row.holesLogged}/18</td>
@@ -209,11 +214,13 @@ export function LiveRoundBoard({ roundId }: { roundId: number }) {
           <div className="mobile-only live-mobile-stack">
             {visibleTeamRows.map((row) => {
               const currentRank = sortedTeamRows.findIndex((item) => item.name === row.name) + 1;
+              const teamHref =
+                entryMode === "team" ? `/rounds/${roundId}?team=${row.teamIndex + 1}&view=readonly` : null;
               return (
               <article key={`mobile-team-${row.name}`} className={`live-mobile-row ${row.mine ? "my-row" : ""}`}>
                 <div className="row-between">
                   <strong>
-                    #{currentRank} {row.name}
+                    #{currentRank} {teamHref ? <Link href={teamHref}>{row.name}</Link> : row.name}
                     <span className="rank-move">
                       {movement(row.name, currentRank) === "up"
                         ? " ▲"
@@ -228,6 +235,11 @@ export function LiveRoundBoard({ roundId }: { roundId: number }) {
                 <div className="live-mobile-meta">
                   <span className="badge">Holes {row.holesLogged}/18</span>
                   {row.mine ? <span className="badge">Your team</span> : null}
+                  {teamHref ? (
+                    <Link href={teamHref} className="badge">
+                      View card
+                    </Link>
+                  ) : null}
                 </div>
               </article>
               );
@@ -261,7 +273,11 @@ export function LiveRoundBoard({ roundId }: { roundId: number }) {
                       .map((player, idx) => (
                         <tr key={`${group.groupName}-${player.player}`} className={player.mine ? "my-row" : ""}>
                           <td>{idx + 1}</td>
-                          <td>{player.player}</td>
+                          <td>
+                            <Link href={`/rounds/${roundId}?player=${encodeURIComponent(player.player)}&view=readonly`}>
+                              {player.player}
+                            </Link>
+                          </td>
                           <td>{player.total || "-"}</td>
                           <td>{player.holesLogged}/18</td>
                         </tr>
@@ -279,13 +295,22 @@ export function LiveRoundBoard({ roundId }: { roundId: number }) {
                     >
                       <div className="row-between">
                         <strong>
-                          #{idx + 1} {player.player}
+                          #{idx + 1}{" "}
+                          <Link href={`/rounds/${roundId}?player=${encodeURIComponent(player.player)}&view=readonly`}>
+                            {player.player}
+                          </Link>
                         </strong>
                         <span className="badge">Total {player.total || "-"}</span>
                       </div>
                       <div className="live-mobile-meta">
                         <span className="badge">Holes {player.holesLogged}/18</span>
                         {player.mine ? <span className="badge">You</span> : null}
+                        <Link
+                          href={`/rounds/${roundId}?player=${encodeURIComponent(player.player)}&view=readonly`}
+                          className="badge"
+                        >
+                          View card
+                        </Link>
                       </div>
                     </article>
                   ))}

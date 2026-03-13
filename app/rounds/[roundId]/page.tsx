@@ -20,6 +20,9 @@ export default function RoundPage() {
   const { session, tripState, updateRoundEntryMode, startRoundLive, stopRoundLive } = useTrip();
   const resolvedRoundId = Number(params.roundId) || 1;
   const requestedHole = Math.max(1, Math.min(18, Number(searchParams.get("hole")) || 1));
+  const requestedPlayer = searchParams.get("player");
+  const requestedTeam = Number(searchParams.get("team"));
+  const isReadOnlyView = searchParams.get("view") === "readonly";
   const runtimeRounds = buildRuntimeRoundTemplates(tripState.roundGroupings);
   const round = runtimeRounds.find((r) => r.id === resolvedRoundId);
   if (!round) {
@@ -38,13 +41,42 @@ export default function RoundPage() {
     );
   }
   const roundPlayers = round.teeTimes.flatMap((group) => group.players);
-  const effectiveSelectedPlayer = roundPlayers.includes(selectedPlayer) ? selectedPlayer : roundPlayers[0];
+  const myPlayer = session.player && roundPlayers.includes(session.player) ? session.player : roundPlayers[0];
+  const requestedPlayerFromLeaderboard =
+    requestedPlayer && roundPlayers.includes(requestedPlayer) ? requestedPlayer : null;
+  const effectiveSelectedPlayer =
+    session.role === "admin"
+      ? roundPlayers.includes(selectedPlayer)
+        ? selectedPlayer
+        : requestedPlayerFromLeaderboard ?? myPlayer
+      : requestedPlayerFromLeaderboard ?? myPlayer;
+  const requestedTeamIndex =
+    Number.isFinite(requestedTeam) && requestedTeam >= 1 && requestedTeam <= round.teeTimes.length
+      ? requestedTeam - 1
+      : null;
+  const canEditRequestedTeam =
+    requestedTeamIndex !== null &&
+    canUseTeamEntry(
+      session,
+      round.id,
+      requestedTeamIndex,
+      tripState.teamDelegateAssignments[round.id]?.[requestedTeamIndex],
+      tripState.roundGroupings,
+    );
+  const isPlayerViewOnly =
+    isReadOnlyView || (session.role !== "admin" && effectiveSelectedPlayer !== (session.player ?? ""));
   const mode = tripState.roundEntryMode[round.id];
   const liveState = tripState.roundLive[round.id];
   const canEnterAnyTeamCard = round.teeTimes.some((_, idx) =>
     canUseTeamEntry(session, round.id, idx, tripState.teamDelegateAssignments[round.id]?.[idx], tripState.roundGroupings),
   );
   const allowTeamModeToggle = [2, 3, 4].includes(round.id) && session.role === "admin";
+  const shouldShowScorecards =
+    liveState.isStarted ||
+    Boolean(liveState.startedAt) ||
+    liveState.isFinalized ||
+    requestedPlayerFromLeaderboard !== null ||
+    requestedTeamIndex !== null;
   const hasRoundData =
     roundPlayers.some((player) => tripState.individualScores[round.id][player].some((score) => score !== "")) ||
     tripState.teamScores[round.id].some((team) => team.holeScores.some((score) => score !== ""));
@@ -125,11 +157,19 @@ export default function RoundPage() {
           </div>
         </section>
 
-        {liveState.isStarted ? (
+        {shouldShowScorecards ? (
           <>
             {mode === "team" && [2, 3, 4].includes(round.id) && canEnterAnyTeamCard ? (
               <div id="score-entry">
-                <TeamScoreEntry roundId={round.id} />
+                <TeamScoreEntry
+                  roundId={round.id}
+                  focusTeamIndex={requestedTeamIndex}
+                  forceViewOnly={requestedTeamIndex !== null ? isReadOnlyView || !canEditRequestedTeam : false}
+                />
+              </div>
+            ) : mode === "team" && [2, 3, 4].includes(round.id) && requestedTeamIndex !== null ? (
+              <div id="score-entry">
+                <TeamScoreEntry roundId={round.id} focusTeamIndex={requestedTeamIndex} forceViewOnly />
               </div>
             ) : mode === "team" && [2, 3, 4].includes(round.id) ? (
               <section id="score-entry" className="card">
@@ -145,6 +185,8 @@ export default function RoundPage() {
                   selectedPlayer={effectiveSelectedPlayer}
                   onPlayerChange={setSelectedPlayer}
                   initialHoleIndex={requestedHole - 1}
+                  canSelectPlayer={session.role === "admin"}
+                  viewOnly={isPlayerViewOnly}
                 />
               </div>
             )}

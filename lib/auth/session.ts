@@ -1,5 +1,5 @@
 import { Role, SessionState } from "@/lib/trip/types";
-import { ADMIN_PLAYER, getTeamScorers } from "@/lib/trip/config";
+import { ADMIN_PLAYER } from "@/lib/trip/config";
 
 const SESSION_STORAGE_KEY = "williamsburg_session_v1";
 
@@ -7,23 +7,8 @@ export function getEmptySession(): SessionState {
   return { player: null, role: null };
 }
 
-export function canViewPlayerCard(session: SessionState, playerName: string): boolean {
-  if (!session.player || !session.role) return false;
-  if (session.role === "admin") return true;
-  return session.player === playerName;
-}
-
-export function canUseTeamEntry(
-  session: SessionState,
-  roundId: number,
-  teamIndex: number,
-  delegateOverride?: string | null,
-  roundGroupings?: Record<number, { time: string; players: string[] }[]>,
-): boolean {
-  if (!session.player || !session.role) return false;
-  if (session.role === "admin") return true;
-  const [captain, delegate] = getTeamScorers(roundId, teamIndex, delegateOverride, roundGroupings);
-  return session.player === captain || session.player === delegate;
+export function isAdmin(session: SessionState): boolean {
+  return session.role === "admin" && session.player === ADMIN_PLAYER;
 }
 
 export function canAccessAdmin(session: SessionState): boolean {

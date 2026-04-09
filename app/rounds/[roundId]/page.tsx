@@ -6,9 +6,10 @@ import { useParams, useSearchParams } from "next/navigation";
 import { AppShell } from "@/components/trip/AppShell";
 import { PlayerScoreEntry } from "@/components/trip/PlayerScoreEntry";
 import { RequireSession } from "@/components/trip/RequireSession";
+import { ScoreCollector } from "@/components/trip/ScoreCollector";
 import { TeamScoreEntry } from "@/components/trip/TeamScoreEntry";
 import { useTrip } from "@/components/trip/TripProvider";
-import { canUseTeamEntry } from "@/lib/auth/session";
+import { isAdmin } from "@/lib/auth/session";
 import { buildRuntimeRoundTemplates } from "@/lib/trip/config";
 
 export default function RoundPage() {
@@ -40,37 +41,23 @@ export default function RoundPage() {
       </RequireSession>
     );
   }
+  const adminUser = isAdmin(session);
   const roundPlayers = round.teeTimes.flatMap((group) => group.players);
   const myPlayer = session.player && roundPlayers.includes(session.player) ? session.player : roundPlayers[0];
   const requestedPlayerFromLeaderboard =
     requestedPlayer && roundPlayers.includes(requestedPlayer) ? requestedPlayer : null;
-  const effectiveSelectedPlayer =
-    session.role === "admin"
-      ? roundPlayers.includes(selectedPlayer)
-        ? selectedPlayer
-        : requestedPlayerFromLeaderboard ?? myPlayer
-      : requestedPlayerFromLeaderboard ?? myPlayer;
+  const effectiveSelectedPlayer = adminUser
+    ? roundPlayers.includes(selectedPlayer)
+      ? selectedPlayer
+      : requestedPlayerFromLeaderboard ?? myPlayer
+    : requestedPlayerFromLeaderboard ?? myPlayer;
   const requestedTeamIndex =
     Number.isFinite(requestedTeam) && requestedTeam >= 1 && requestedTeam <= round.teeTimes.length
       ? requestedTeam - 1
       : null;
-  const canEditRequestedTeam =
-    requestedTeamIndex !== null &&
-    canUseTeamEntry(
-      session,
-      round.id,
-      requestedTeamIndex,
-      tripState.teamDelegateAssignments[round.id]?.[requestedTeamIndex],
-      tripState.roundGroupings,
-    );
-  const isPlayerViewOnly =
-    isReadOnlyView || (session.role !== "admin" && effectiveSelectedPlayer !== (session.player ?? ""));
   const mode = tripState.roundEntryMode[round.id];
   const liveState = tripState.roundLive[round.id];
-  const canEnterAnyTeamCard = round.teeTimes.some((_, idx) =>
-    canUseTeamEntry(session, round.id, idx, tripState.teamDelegateAssignments[round.id]?.[idx], tripState.roundGroupings),
-  );
-  const allowTeamModeToggle = [2, 3, 4].includes(round.id) && session.role === "admin";
+  const allowTeamModeToggle = [2, 3, 4].includes(round.id) && adminUser;
   const shouldShowScorecards =
     liveState.isStarted ||
     Boolean(liveState.startedAt) ||
@@ -97,7 +84,7 @@ export default function RoundPage() {
         <section className="card">
           <div className="row-between">
             <div>
-              <h2>{round.name} scorecard</h2>
+              <h2>{round.name} {adminUser ? "score collection" : "scorecard"}</h2>
               <p className="muted">{round.course}</p>
             </div>
             <div className="row-wrap">
@@ -118,7 +105,7 @@ export default function RoundPage() {
           </div>
         </section>
 
-        {[2, 3, 4].includes(round.id) && allowTeamModeToggle ? (
+        {allowTeamModeToggle ? (
           <section id="entry-mode" className="card">
             <div className="row-between">
               <h3>Entry Mode</h3>
@@ -134,50 +121,45 @@ export default function RoundPage() {
           </section>
         ) : null}
 
-        <section id="round-control" className="card masters-start">
-          <div className="row-between">
-            <div>
-              <h3>Round status</h3>
-              <p className="muted">{liveState.isStarted ? "Scoring is open." : "Start round to open scoring."}</p>
+        {adminUser ? (
+          <section id="round-control" className="card masters-start">
+            <div className="row-between">
+              <div>
+                <h3>Round status</h3>
+                <p className="muted">{liveState.isStarted ? "Scoring is open." : "Start round to open scoring."}</p>
+              </div>
+              <div className="row-wrap">
+                {liveState.isStarted ? (
+                  <button className="button ghost" onClick={() => stopRoundLive(round.id)}>
+                    Pause Round
+                  </button>
+                ) : (
+                  <button className="button" onClick={() => startRoundLive(round.id)} disabled={liveState.isFinalized}>
+                    Start Round Live
+                  </button>
+                )}
+                <Link href={`/rounds/${round.id}/leaderboard`} className="button ghost">
+                  Open Leaderboard
+                </Link>
+              </div>
             </div>
-            <div className="row-wrap">
-              {liveState.isStarted ? (
-                <button className="button ghost" onClick={() => stopRoundLive(round.id)}>
-                  Pause Round
-                </button>
-              ) : (
-                <button className="button" onClick={() => startRoundLive(round.id)} disabled={liveState.isFinalized}>
-                  Start Round Live
-                </button>
-              )}
-              <Link href={`/rounds/${round.id}/leaderboard`} className="button ghost">
-                Open Leaderboard
-              </Link>
-            </div>
-          </div>
-        </section>
+          </section>
+        ) : null}
 
         {shouldShowScorecards ? (
           <>
-            {mode === "team" && [2, 3, 4].includes(round.id) && canEnterAnyTeamCard ? (
+            {mode === "team" && [2, 3, 4].includes(round.id) ? (
               <div id="score-entry">
                 <TeamScoreEntry
                   roundId={round.id}
                   focusTeamIndex={requestedTeamIndex}
-                  forceViewOnly={requestedTeamIndex !== null ? isReadOnlyView || !canEditRequestedTeam : false}
+                  forceViewOnly={!adminUser || isReadOnlyView}
                 />
               </div>
-            ) : mode === "team" && [2, 3, 4].includes(round.id) && requestedTeamIndex !== null ? (
+            ) : adminUser ? (
               <div id="score-entry">
-                <TeamScoreEntry roundId={round.id} focusTeamIndex={requestedTeamIndex} forceViewOnly />
+                <ScoreCollector roundId={round.id} />
               </div>
-            ) : mode === "team" && [2, 3, 4].includes(round.id) ? (
-              <section id="score-entry" className="card">
-                <p className="muted">Team scores are entered by assigned team scorers.</p>
-                <Link href={`/rounds/${round.id}/leaderboard`} className="button ghost">
-                  View leaderboard
-                </Link>
-              </section>
             ) : (
               <div id="score-entry">
                 <PlayerScoreEntry
@@ -185,15 +167,17 @@ export default function RoundPage() {
                   selectedPlayer={effectiveSelectedPlayer}
                   onPlayerChange={setSelectedPlayer}
                   initialHoleIndex={requestedHole - 1}
-                  canSelectPlayer={session.role === "admin"}
-                  viewOnly={isPlayerViewOnly}
+                  canSelectPlayer={false}
+                  viewOnly
                 />
               </div>
             )}
           </>
         ) : (
           <section className="card">
-            <p className="muted">Round is not live yet.</p>
+            <p className="muted">
+              {adminUser ? "Start the round to begin collecting scores." : "Round is not live yet."}
+            </p>
             <Link href={`/rounds/${round.id}/leaderboard`} className="button ghost">
               Open leaderboard
             </Link>

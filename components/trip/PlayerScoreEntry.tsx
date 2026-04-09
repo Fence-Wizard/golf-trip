@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useTrip } from "@/components/trip/TripProvider";
 import { buildRuntimeRoundTemplates, findFlight } from "@/lib/trip/config";
-import { canViewPlayerCard } from "@/lib/auth/session";
+import { isAdmin } from "@/lib/auth/session";
 import { sumScores } from "@/lib/trip/scoring";
 
 interface PlayerScoreEntryProps {
@@ -77,7 +77,7 @@ export function PlayerScoreEntry({
   const runtimeRounds = useMemo(() => buildRuntimeRoundTemplates(tripState.roundGroupings), [tripState.roundGroupings]);
   const round = runtimeRounds.find((r) => r.id === roundId) ?? runtimeRounds[0];
   const roundCourse = tripState.courseDataPublished[roundId];
-  const canEdit = !viewOnly && canViewPlayerCard(session, selectedPlayer);
+  const canEdit = !viewOnly && isAdmin(session);
   const viewingOtherPlayer = session.player !== selectedPlayer;
   const enforceSequentialLock = canEdit && enforceSequential;
   const roundSave = roundSaveStatus[roundId];

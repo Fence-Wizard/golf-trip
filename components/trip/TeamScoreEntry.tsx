@@ -1,8 +1,7 @@
 "use client";
 
 import { useTrip } from "@/components/trip/TripProvider";
-import { canUseTeamEntry } from "@/lib/auth/session";
-import { getTeamScorers } from "@/lib/trip/config";
+import { isAdmin } from "@/lib/auth/session";
 import { scoreTeamCards } from "@/lib/trip/scoring";
 
 interface TeamScoreEntryProps {
@@ -32,24 +31,16 @@ export function TeamScoreEntry({ roundId, focusTeamIndex = null, forceViewOnly =
       item.status === "open" &&
       (focusTeamIndex === null || item.teamIndex === focusTeamIndex),
   );
-  const canEditVisibleTeams = visibleTeamIndexes.some((teamIndex) =>
-    !forceViewOnly &&
-    canUseTeamEntry(
-      session,
-      roundId,
-      teamIndex,
-      tripState.teamDelegateAssignments[roundId]?.[teamIndex],
-      tripState.roundGroupings,
-    ),
-  );
-  const saveLabel = canEditVisibleTeams
+  const adminUser = isAdmin(session);
+  const canEdit = adminUser && !forceViewOnly;
+  const saveLabel = canEdit
     ? save?.state === "saving"
       ? "Saving..."
       : save?.state === "error"
         ? "Save issue"
         : "Saved"
     : "View only";
-  const saveDetail = canEditVisibleTeams
+  const saveDetail = canEdit
     ? save?.state === "error"
       ? save.message ?? "Please retry."
       : save?.lastSavedAt
@@ -57,8 +48,8 @@ export function TeamScoreEntry({ roundId, focusTeamIndex = null, forceViewOnly =
         : "Changes sync automatically."
     : "Viewing team scorecard only.";
 
-  const handleTeamScoreChange = (teamIndex: number, holeIndex: number, rawValue: string, canEditThisTeam: boolean) => {
-    if (!canEditThisTeam) return;
+  const handleTeamScoreChange = (teamIndex: number, holeIndex: number, rawValue: string) => {
+    if (!canEdit) return;
     if (rawValue.trim() === "") {
       updateTeamHoleScore(roundId, teamIndex, holeIndex, "");
       return;
@@ -85,23 +76,15 @@ export function TeamScoreEntry({ roundId, focusTeamIndex = null, forceViewOnly =
       <p className="muted">
         {forceViewOnly
           ? "Viewing a team scorecard in read-only mode."
-          : "Each team uses two scorers (captain + delegate). Mismatches require review."}
+          : "Enter each team's scores directly."}
       </p>
       <div className="row-wrap">
         <span className="badge">{focusTeamIndex === null ? `${visibleTeamIndexes.length} teams` : "Single team view"}</span>
-        <span className="badge">
-          {openDiscrepancies.length} open {openDiscrepancies.length === 1 ? "discrepancy" : "discrepancies"}
-        </span>
       </div>
 
       <div className="stack-md">
         {teams.map((team, teamIndex) => {
           if (!visibleTeamIndexes.includes(teamIndex)) return null;
-          const delegateOverride = tripState.teamDelegateAssignments[roundId]?.[teamIndex];
-          const [scorerA, scorerB] = getTeamScorers(roundId, teamIndex, delegateOverride, tripState.roundGroupings);
-          const canEditThisTeam =
-            !forceViewOnly &&
-            canUseTeamEntry(session, roundId, teamIndex, delegateOverride, tripState.roundGroupings);
           const teamSummary = scored.find((group) => group.teamName === team.teamName);
           const frontScores = team.holeScores.slice(0, 9);
           const backScores = team.holeScores.slice(9);
@@ -118,7 +101,7 @@ export function TeamScoreEntry({ roundId, focusTeamIndex = null, forceViewOnly =
                 <div className="row-wrap">
                   <span className="badge">Total {teamSummary?.total || "-"}</span>
                   {teamSummary?.isWinner ? <span className="winner-pill">Leader</span> : null}
-                  <span className="badge">{canEditThisTeam ? "Editable" : "View only"}</span>
+                  <span className="badge">{canEdit ? "Editable" : "View only"}</span>
                 </div>
               </div>
 
@@ -129,17 +112,6 @@ export function TeamScoreEntry({ roundId, focusTeamIndex = null, forceViewOnly =
                   </span>
                 ))}
               </div>
-
-              <div className="row-wrap">
-                <span className="badge">Captain {scorerA}</span>
-                <span className="badge">Delegate {scorerB}</span>
-              </div>
-
-              {!canEditThisTeam ? (
-                <p className={forceViewOnly ? "muted" : "warning"}>
-                  {forceViewOnly ? "Opened from the leaderboard in view-only mode." : "Only assigned scorers for this team can enter this card."}
-                </p>
-              ) : null}
 
               <div className="team-score-sections">
                 <div className="stack-sm">
@@ -159,9 +131,9 @@ export function TeamScoreEntry({ roundId, focusTeamIndex = null, forceViewOnly =
                           min={1}
                           max={Math.min(maxStrokesPerHole, (roundCourse[holeIndex]?.par ?? 4) + 2)}
                           value={score}
-                          disabled={!canEditThisTeam}
+                          disabled={!canEdit}
                           aria-label={`Team ${team.teamName} hole ${holeIndex + 1} score`}
-                          onChange={(e) => handleTeamScoreChange(teamIndex, holeIndex, e.target.value, canEditThisTeam)}
+                          onChange={(e) => handleTeamScoreChange(teamIndex, holeIndex, e.target.value)}
                         />
                       </label>
                     ))}
@@ -187,9 +159,9 @@ export function TeamScoreEntry({ roundId, focusTeamIndex = null, forceViewOnly =
                             min={1}
                             max={Math.min(maxStrokesPerHole, (roundCourse[holeIndex]?.par ?? 4) + 2)}
                             value={score}
-                            disabled={!canEditThisTeam}
+                            disabled={!canEdit}
                             aria-label={`Team ${team.teamName} hole ${holeIndex + 1} score`}
-                            onChange={(e) => handleTeamScoreChange(teamIndex, holeIndex, e.target.value, canEditThisTeam)}
+                            onChange={(e) => handleTeamScoreChange(teamIndex, holeIndex, e.target.value)}
                           />
                         </label>
                       );
@@ -202,10 +174,10 @@ export function TeamScoreEntry({ roundId, focusTeamIndex = null, forceViewOnly =
         })}
       </div>
 
-      {openDiscrepancies.length > 0 ? (
+      {openDiscrepancies.length > 0 && adminUser ? (
         <section className="warning">
           <p>
-            Open discrepancies: {openDiscrepancies.length}. Review with both scorers and resolve before finalizing.
+            Legacy discrepancies: {openDiscrepancies.length}. Resolve to clean up data.
           </p>
           <div className="stack-sm">
             {openDiscrepancies.map((item) => (
@@ -214,26 +186,22 @@ export function TeamScoreEntry({ roundId, focusTeamIndex = null, forceViewOnly =
                   {item.teamName} - Hole {item.holeIndex + 1}: {item.scorerA}={item.scoreA || "-"} vs {item.scorerB}=
                   {item.scoreB || "-"}
                 </p>
-                {session.role === "admin" ? (
-                  <div className="row-wrap">
-                    <button
-                      type="button"
-                      className="button ghost"
-                      onClick={() => resolveTeamScoreDiscrepancy(item.roundId, item.teamIndex, item.holeIndex, "A")}
-                    >
-                      Override with {item.scorerA}
-                    </button>
-                    <button
-                      type="button"
-                      className="button ghost"
-                      onClick={() => resolveTeamScoreDiscrepancy(item.roundId, item.teamIndex, item.holeIndex, "B")}
-                    >
-                      Override with {item.scorerB}
-                    </button>
-                  </div>
-                ) : (
-                  <p className="muted">Admin override required if scorers cannot resolve.</p>
-                )}
+                <div className="row-wrap">
+                  <button
+                    type="button"
+                    className="button ghost"
+                    onClick={() => resolveTeamScoreDiscrepancy(item.roundId, item.teamIndex, item.holeIndex, "A")}
+                  >
+                    Use {item.scoreA || "-"}
+                  </button>
+                  <button
+                    type="button"
+                    className="button ghost"
+                    onClick={() => resolveTeamScoreDiscrepancy(item.roundId, item.teamIndex, item.holeIndex, "B")}
+                  >
+                    Use {item.scoreB || "-"}
+                  </button>
+                </div>
               </div>
             ))}
           </div>
@@ -269,10 +237,6 @@ export function TeamScoreEntry({ roundId, focusTeamIndex = null, forceViewOnly =
           <p className="metric-value">{visibleTeamIndexes.length}</p>
         </article>
         <article className="metric-tile">
-          <p className="eyebrow">Open discrepancies</p>
-          <p className="metric-value">{openDiscrepancies.length}</p>
-        </article>
-        <article className="metric-tile">
           <p className="eyebrow">Save status</p>
           <p className="metric-value">{saveLabel}</p>
           <p className="muted">{saveDetail}</p>
@@ -280,8 +244,8 @@ export function TeamScoreEntry({ roundId, focusTeamIndex = null, forceViewOnly =
       </div>
 
       <div className="row-between">
-        <p className="muted">{forceViewOnly ? "Opened from a leaderboard link." : "Assigned scorers can post the official team card."}</p>
-        {canEditVisibleTeams ? (
+        <p className="muted">{forceViewOnly ? "Opened from a leaderboard link." : "Admin enters all team scores directly."}</p>
+        {canEdit ? (
           <button type="button" className="button ghost" onClick={() => undoLastScoreEdit(roundId)}>
             Undo last edit
           </button>

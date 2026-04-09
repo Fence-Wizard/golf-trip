@@ -1,7 +1,6 @@
-import { canUseTeamEntry } from "@/lib/auth/session";
 import { ADMIN_PLAYER } from "@/lib/trip/config";
 import { buildInitialTripState } from "@/lib/trip/storage";
-import { Role, SessionState, TripState } from "@/lib/trip/types";
+import { SessionState, TripState } from "@/lib/trip/types";
 import { hasDatabaseUrl, sql } from "@/lib/server/neon";
 
 const TRIP_STATE_ROW_ID = "primary";
@@ -66,73 +65,9 @@ export async function getTripStateRecord(): Promise<TripStateRecord | null> {
   };
 }
 
-function jsonEqual(a: unknown, b: unknown) {
-  return JSON.stringify(a) === JSON.stringify(b);
-}
-
-function canWriteTeamCard(session: SessionState, state: TripState, roundId: number, teamIndex: number) {
-  if (session.role === "admin") return true;
-  return canUseTeamEntry(session, roundId, teamIndex, state.teamDelegateAssignments[roundId]?.[teamIndex], state.roundGroupings);
-}
-
-function assertRoundLiveAllowed(previous: TripState, next: TripState, session: SessionState) {
-  if (session.role === "admin") return true;
-  return Object.keys(previous.roundLive).every((roundIdKey) => {
-    const roundId = Number(roundIdKey);
-    const before = previous.roundLive[roundId];
-    const after = next.roundLive[roundId];
-    if (!after) return false;
-    return (
-      before.isFinalized === after.isFinalized &&
-      before.finalizedAt === after.finalizedAt &&
-      before.finalizedBy === after.finalizedBy
-    );
-  });
-}
-
-export function canSessionMutateTripState(previous: TripState, next: TripState, session: SessionState) {
+export function canSessionMutateTripState(_previous: TripState, _next: TripState, session: SessionState) {
   if (!session.player || !session.role) return false;
-  if (session.role === "admin") return session.player === ADMIN_PLAYER;
-
-  if (
-    !jsonEqual(previous.roster, next.roster) ||
-    !jsonEqual(previous.flights, next.flights) ||
-    !jsonEqual(previous.roundGroupings, next.roundGroupings) ||
-    !jsonEqual(previous.payoutSettings, next.payoutSettings) ||
-    !jsonEqual(previous.teamDelegateAssignments, next.teamDelegateAssignments) ||
-    !jsonEqual(previous.courseDataDraft, next.courseDataDraft) ||
-    !jsonEqual(previous.courseDataPublished, next.courseDataPublished) ||
-    !jsonEqual(previous.coursePublication, next.coursePublication) ||
-    !jsonEqual(previous.roundEntryMode, next.roundEntryMode)
-  ) {
-    return false;
-  }
-
-  if (!assertRoundLiveAllowed(previous, next, session)) {
-    return false;
-  }
-
-  for (const [roundIdKey, scoresByPlayer] of Object.entries(previous.individualScores)) {
-    const roundId = Number(roundIdKey);
-    const nextScoresByPlayer = next.individualScores[roundId];
-    if (!nextScoresByPlayer) return false;
-    for (const [player, scores] of Object.entries(scoresByPlayer)) {
-      if (player === session.player) continue;
-      if (!jsonEqual(scores, nextScoresByPlayer[player])) return false;
-    }
-  }
-
-  for (const [roundIdKey, teamCards] of Object.entries(previous.teamScores)) {
-    const roundId = Number(roundIdKey);
-    const nextCards = next.teamScores[roundId];
-    if (!nextCards) return false;
-    for (const [teamIndex, teamCard] of teamCards.entries()) {
-      if (canWriteTeamCard(session, next, roundId, teamIndex)) continue;
-      if (!jsonEqual(teamCard, nextCards[teamIndex])) return false;
-    }
-  }
-
-  return true;
+  return session.role === "admin" && session.player === ADMIN_PLAYER;
 }
 
 export async function saveTripStateRecord(

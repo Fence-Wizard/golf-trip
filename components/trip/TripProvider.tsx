@@ -37,8 +37,6 @@ import {
   ScoreEditEvent,
   SessionState,
   TeeGroup,
-  TeamCard,
-  TeamScoreDiscrepancy,
   TripState,
 } from "@/lib/trip/types";
 
@@ -338,12 +336,9 @@ export function TripProvider({ children }: { children: React.ReactNode }) {
     return true;
   };
 
-  const canEditTeamCard = (roundId: number, teamIndex: number): boolean => {
-    if (!session.player || !session.role) return false;
-    if (session.role === "admin") return true;
-    const delegateOverride = tripState.teamDelegateAssignments[roundId]?.[teamIndex];
-    const [captain, delegate] = getTeamScorers(roundId, teamIndex, delegateOverride, tripState.roundGroupings);
-    return session.player === captain || session.player === delegate;
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const canEditTeamCard = (_roundId: number, _teamIndex: number): boolean => {
+    return session.role === "admin";
   };
 
   const addConflictIfNeeded = (
@@ -502,7 +497,7 @@ export function TripProvider({ children }: { children: React.ReactNode }) {
       return false;
     }
     if (!canEditTeamCard(roundId, teamIndex)) {
-      updateRoundStatusMessage(roundId, "Only assigned team scorers can edit this card.");
+      updateRoundStatusMessage(roundId, "Only admin can edit team scores.");
       return false;
     }
     if (!tripState.teamScores[roundId]?.[teamIndex] || holeIndex < 0 || holeIndex > 17) return false;
@@ -511,53 +506,10 @@ export function TripProvider({ children }: { children: React.ReactNode }) {
     let changed = false;
 
     setTripState((prev) => {
-      const [scorerA, scorerB] = getTeamScorers(
-        roundId,
-        teamIndex,
-        prev.teamDelegateAssignments[roundId]?.[teamIndex],
-        prev.roundGroupings,
-      );
-      const previousValue =
-        prev.teamEntrySubmissions[roundId]?.[teamIndex]?.[editedBy]?.[holeIndex] ??
-        prev.teamScores[roundId][teamIndex].holeScores[holeIndex];
+      const previousValue = prev.teamScores[roundId][teamIndex].holeScores[holeIndex];
       const nextValue = toHoleNumber(rawValue);
       if (previousValue === nextValue) return prev;
       changed = true;
-
-      const nextSubmissionsByRound = { ...prev.teamEntrySubmissions };
-      const nextRoundSubmissions = { ...(nextSubmissionsByRound[roundId] ?? {}) };
-      const existingTeamSubmissions = nextRoundSubmissions[teamIndex] ?? {};
-      const ensureScorerA = existingTeamSubmissions[scorerA] ?? Array.from({ length: 18 }, () => "");
-      const ensureScorerB = existingTeamSubmissions[scorerB] ?? Array.from({ length: 18 }, () => "");
-      const currentEditorScores =
-        existingTeamSubmissions[editedBy] ??
-        (editedBy === scorerA ? ensureScorerA : editedBy === scorerB ? ensureScorerB : Array.from({ length: 18 }, () => ""));
-      const updatedEditorScores = currentEditorScores.map((existing, hIdx) => (hIdx === holeIndex ? nextValue : existing));
-      const nextTeamSubmissions = {
-        ...existingTeamSubmissions,
-        [scorerA]: ensureScorerA,
-        [scorerB]: ensureScorerB,
-        [editedBy]: updatedEditorScores,
-      };
-      const scoreA = nextTeamSubmissions[scorerA]?.[holeIndex] ?? "";
-      const scoreB = nextTeamSubmissions[scorerB]?.[holeIndex] ?? "";
-      const hasA = scoreA !== "";
-      const hasB = scoreB !== "";
-      const mismatch = hasA && hasB && scoreA !== scoreB;
-      const previousOfficial = prev.teamScores[roundId][teamIndex].holeScores[holeIndex];
-      const nextOfficial =
-        hasA && hasB
-          ? mismatch
-            ? previousOfficial
-            : scoreA
-          : hasA
-            ? scoreA
-            : hasB
-              ? scoreB
-              : "";
-
-      nextRoundSubmissions[teamIndex] = nextTeamSubmissions;
-      nextSubmissionsByRound[roundId] = nextRoundSubmissions;
 
       const scoreEditEvent: ScoreEditEvent = {
         id: `${roundId}-${teamName}-${holeIndex}-${Date.now()}`,
@@ -570,11 +522,6 @@ export function TripProvider({ children }: { children: React.ReactNode }) {
         nextValue,
         editedBy,
       };
-      const conflict = addConflictIfNeeded(prev, roundId, holeIndex, "team", teamName, editedBy);
-      const nextConflicts = conflict ? [...prev.scoreConflicts.slice(-199), conflict] : prev.scoreConflicts;
-      if (conflict) {
-        updateRoundStatusMessage(roundId, conflict.message);
-      }
 
       if (recordUndo) {
         setUndoByRound((undoPrev) => ({
@@ -589,60 +536,17 @@ export function TripProvider({ children }: { children: React.ReactNode }) {
         }));
       }
 
-      const keyMatch = (item: TeamScoreDiscrepancy) =>
-        item.roundId === roundId && item.teamIndex === teamIndex && item.holeIndex === holeIndex && item.status === "open";
-      const existingOpen = prev.teamScoreDiscrepancies.find(keyMatch);
-      let nextDiscrepancies = prev.teamScoreDiscrepancies;
-      if (mismatch) {
-        const nextItem: TeamScoreDiscrepancy = {
-          id: existingOpen?.id ?? `${roundId}-${teamIndex}-${holeIndex}-${Date.now()}`,
-          roundId,
-          teamIndex,
-          holeIndex,
-          teamName,
-          scorerA,
-          scorerB,
-          scoreA,
-          scoreB,
-          createdAt: existingOpen?.createdAt ?? new Date().toISOString(),
-          status: "open",
-          resolvedAt: null,
-          resolvedBy: null,
-          overrideScore: null,
-        };
-        nextDiscrepancies = [...prev.teamScoreDiscrepancies.filter((item) => !keyMatch(item)), nextItem].slice(-200);
-        updateRoundStatusMessage(
-          roundId,
-          `Score discrepancy on ${teamName} hole ${holeIndex + 1}. Review and resolve before finalizing.`,
-        );
-      } else if (existingOpen) {
-        nextDiscrepancies = [
-          ...prev.teamScoreDiscrepancies.filter((item) => !keyMatch(item)),
-          {
-            ...existingOpen,
-            status: "resolved",
-            resolvedAt: new Date().toISOString(),
-            resolvedBy: editedBy,
-            overrideScore: typeof nextOfficial === "number" ? nextOfficial : null,
-          },
-        ].slice(-200);
-      }
-
       return {
         ...prev,
         scoreEditHistory: [...prev.scoreEditHistory.slice(-399), scoreEditEvent],
-        scoreConflicts: nextConflicts,
-        teamEntrySubmissions: nextSubmissionsByRound,
-        teamScoreDiscrepancies: nextDiscrepancies,
         teamScores: {
           ...prev.teamScores,
           [roundId]: prev.teamScores[roundId].map((team, idx) => {
             if (idx !== teamIndex) return team;
-            const next: TeamCard = {
+            return {
               ...team,
-              holeScores: team.holeScores.map((existing, hIdx) => (hIdx === holeIndex ? nextOfficial : existing)),
+              holeScores: team.holeScores.map((existing, hIdx) => (hIdx === holeIndex ? nextValue : existing)),
             };
-            return next;
           }),
         },
         roundLive: {

@@ -6,7 +6,7 @@ import {
   roundTemplates,
   TEAM_WIN_PAYOUT,
 } from "@/lib/trip/config";
-import { PayoutSettings, RoundTemplate, ScoreEntryMode, TeamCard } from "@/lib/trip/types";
+import { AggregateScoreCard, PayoutSettings, RoundTemplate, ScoreEntryMode, TeamCard } from "@/lib/trip/types";
 
 export function sumScores(values: Array<number | "">): number {
   return values.reduce<number>((acc, val) => acc + (Number(val) || 0), 0);
@@ -14,6 +14,7 @@ export function sumScores(values: Array<number | "">): number {
 
 export function buildRoundTotals(
   individualScores: Record<number, Record<string, Array<number | "">>>,
+  individualAggregateScores: Record<number, Record<string, AggregateScoreCard>> = {},
   roster: string[] = players,
   rounds: RoundTemplate[] = roundTemplates,
 ) {
@@ -21,7 +22,12 @@ export function buildRoundTotals(
   for (const round of rounds) {
     totals[round.id] = {};
     for (const player of roster) {
-      totals[round.id][player] = sumScores(individualScores[round.id]?.[player] ?? []);
+      const aggregate = individualAggregateScores[round.id]?.[player];
+      if (typeof aggregate?.total === "number" && aggregate.total > 0) {
+        totals[round.id][player] = aggregate.total;
+      } else {
+        totals[round.id][player] = sumScores(individualScores[round.id]?.[player] ?? []);
+      }
     }
   }
   return totals;
@@ -31,7 +37,7 @@ export function scoreTeamCards(teamCards: TeamCard[]) {
   const groups = teamCards.map((card) => ({
     teamName: card.teamName,
     players: card.players,
-    total: sumScores(card.holeScores),
+    total: typeof card.aggregateScore?.total === "number" ? card.aggregateScore.total : sumScores(card.holeScores),
   }));
 
   const completed = groups.filter((g) => g.total > 0);

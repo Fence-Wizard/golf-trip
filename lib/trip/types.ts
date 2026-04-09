@@ -88,9 +88,17 @@ export interface TeamCard {
   teamName: string;
   players: string[];
   holeScores: Array<number | "">;
+  aggregateScore: AggregateScoreCard;
+}
+
+export interface AggregateScoreCard {
+  front9: number | "";
+  back9: number | "";
+  total: number | "";
 }
 
 export type IndividualScoresByRound = Record<number, Record<string, Array<number | "">>>;
+export type IndividualAggregateScoresByRound = Record<number, Record<string, AggregateScoreCard>>;
 export type CourseDataByRound = Record<number, HoleData[]>;
 export type TeamScoresByRound = Record<number, TeamCard[]>;
 export type EntryModeByRound = Record<number, ScoreEntryMode>;
@@ -123,6 +131,7 @@ export interface TripState {
   roundGroupings: Record<number, TeeGroup[]>;
   payoutSettings: PayoutSettings;
   individualScores: IndividualScoresByRound;
+  individualAggregateScores: IndividualAggregateScoresByRound;
   teamScores: TeamScoresByRound;
   teamDelegateAssignments: TeamDelegateAssignmentsByRound;
   teamEntrySubmissions: TeamEntrySubmissionsByRound;

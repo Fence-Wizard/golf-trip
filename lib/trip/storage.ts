@@ -1,7 +1,9 @@
 import {
+  buildEmptyAggregateScoreCard,
   buildInitialCoursePublication,
   buildInitialCourseData,
   buildInitialFlights,
+  buildInitialIndividualAggregateScoresForRoster,
   buildInitialPayoutSettings,
   buildInitialRoundGroupings,
   buildInitialRoster,
@@ -31,6 +33,7 @@ export function buildInitialTripState(): TripState {
     roundGroupings,
     payoutSettings: buildInitialPayoutSettings(),
     individualScores: buildInitialIndividualScoresForRoster(roster, roundGroupings),
+    individualAggregateScores: buildInitialIndividualAggregateScoresForRoster(roster, roundGroupings),
     teamScores: buildInitialTeamScores(roundGroupings),
     teamDelegateAssignments: delegates,
     teamEntrySubmissions: buildInitialTeamEntrySubmissions(delegates, roundGroupings),
@@ -45,7 +48,7 @@ export function buildInitialTripState(): TripState {
   };
 }
 
-function normalizeTripState(raw: Partial<TripState>): TripState {
+export function normalizeTripState(raw: Partial<TripState>): TripState {
   const base = buildInitialTripState();
   const normalized: TripState = {
     ...base,
@@ -66,6 +69,10 @@ function normalizeTripState(raw: Partial<TripState>): TripState {
     payoutSettings: {
       ...base.payoutSettings,
       ...(raw.payoutSettings ?? {}),
+    },
+    individualAggregateScores: {
+      ...base.individualAggregateScores,
+      ...(raw.individualAggregateScores ?? {}),
     },
     teamDelegateAssignments: raw.teamDelegateAssignments ?? base.teamDelegateAssignments,
     teamEntrySubmissions: raw.teamEntrySubmissions ?? base.teamEntrySubmissions,
@@ -105,7 +112,46 @@ function normalizeTripState(raw: Partial<TripState>): TripState {
       if (!normalized.individualScores[roundId][player]) {
         normalized.individualScores[roundId][player] = Array.from({ length: 18 }, () => "");
       }
+      if (!normalized.individualAggregateScores[roundId][player]) {
+        const playerScores = normalized.individualScores[roundId][player];
+        const front9 = playerScores.slice(0, 9).reduce<number>((acc, value) => acc + (Number(value) || 0), 0);
+        const back9 = playerScores.slice(9, 18).reduce<number>((acc, value) => acc + (Number(value) || 0), 0);
+        const hasAnyScore = playerScores.some((value) => value !== "");
+        normalized.individualAggregateScores[roundId][player] = hasAnyScore
+          ? {
+              front9: front9 > 0 ? front9 : "",
+              back9: back9 > 0 ? back9 : "",
+              total: front9 + back9 > 0 ? front9 + back9 : "",
+            }
+          : buildEmptyAggregateScoreCard();
+      }
     }
+    for (const group of normalized.roundGroupings[roundId] ?? []) {
+      for (const player of group.players) {
+        if (!normalized.individualScores[roundId][player]) {
+          normalized.individualScores[roundId][player] = Array.from({ length: 18 }, () => "");
+        }
+        if (!normalized.individualAggregateScores[roundId][player]) {
+          normalized.individualAggregateScores[roundId][player] = buildEmptyAggregateScoreCard();
+        }
+      }
+    }
+    normalized.teamScores[roundId] = (normalized.teamScores[roundId] ?? []).map((team) => {
+      if (team.aggregateScore) return team;
+      const front9 = team.holeScores.slice(0, 9).reduce<number>((acc, value) => acc + (Number(value) || 0), 0);
+      const back9 = team.holeScores.slice(9, 18).reduce<number>((acc, value) => acc + (Number(value) || 0), 0);
+      const hasAny = team.holeScores.some((value) => value !== "");
+      return {
+        ...team,
+        aggregateScore: hasAny
+          ? {
+              front9: front9 > 0 ? front9 : "",
+              back9: back9 > 0 ? back9 : "",
+              total: front9 + back9 > 0 ? front9 + back9 : "",
+            }
+          : buildEmptyAggregateScoreCard(),
+      };
+    });
 
     const template = defaultHoleTemplate;
     const seed = seededCourseDataByRound[roundId];

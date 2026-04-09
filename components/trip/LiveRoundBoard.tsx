@@ -10,6 +10,11 @@ function completedHoles(values: Array<number | "">): number {
   return values.filter((v) => v !== "").length;
 }
 
+function completedAggregateCard(card: { front9: number | ""; back9: number | ""; total: number | "" } | undefined): boolean {
+  if (!card) return false;
+  return card.front9 !== "" && card.back9 !== "" && card.total !== "";
+}
+
 export function LiveRoundBoard({ roundId }: { roundId: number }) {
   const { tripState, scoreTotals, session } = useTrip();
   const runtimeRounds = useMemo(() => buildRuntimeRoundTemplates(tripState.roundGroupings), [tripState.roundGroupings]);
@@ -29,7 +34,7 @@ export function LiveRoundBoard({ roundId }: { roundId: number }) {
         name: row.teamName,
         players: row.players.join(", "),
         total: row.total,
-        holesLogged: completedHoles(tripState.teamScores[roundId][idx].holeScores),
+        holesLogged: completedAggregateCard(tripState.teamScores[roundId][idx].aggregateScore) ? 18 : 0,
         mine: row.players.includes(session.player ?? ""),
       }));
     }
@@ -40,7 +45,10 @@ export function LiveRoundBoard({ roundId }: { roundId: number }) {
         players: group.players.join(", "),
         total: group.players.reduce((acc, player) => acc + (scoreTotals[roundId][player] || 0), 0),
         holesLogged: Math.min(
-          ...group.players.map((player) => completedHoles(tripState.individualScores[roundId][player])),
+          ...group.players.map((player) => {
+            const aggregate = tripState.individualAggregateScores[roundId]?.[player];
+            return completedAggregateCard(aggregate) ? 18 : completedHoles(tripState.individualScores[roundId][player]);
+          }),
         ),
         mine: group.players.includes(session.player ?? ""),
       }))
@@ -56,6 +64,7 @@ export function LiveRoundBoard({ roundId }: { roundId: number }) {
     roundId,
     scoreTotals,
     session.player,
+    tripState.individualAggregateScores,
     tripState.individualScores,
     tripState.teamScores,
   ]);
@@ -66,7 +75,9 @@ export function LiveRoundBoard({ roundId }: { roundId: number }) {
       const playerRows = group.players.map((player) => ({
         player,
         total: scoreTotals[roundId][player],
-        holesLogged: completedHoles(tripState.individualScores[roundId][player]),
+        holesLogged: completedAggregateCard(tripState.individualAggregateScores[roundId]?.[player])
+          ? 18
+          : completedHoles(tripState.individualScores[roundId][player]),
         mine: player === session.player,
       }));
       return {
@@ -75,7 +86,7 @@ export function LiveRoundBoard({ roundId }: { roundId: number }) {
         teamTotal: playerRows.reduce((acc, p) => acc + (p.total || 0), 0),
       };
     });
-  }, [isTeamEvent, round.teeTimes, roundId, scoreTotals, session.player, tripState.individualScores]);
+  }, [isTeamEvent, round.teeTimes, roundId, scoreTotals, session.player, tripState.individualAggregateScores, tripState.individualScores]);
 
   useEffect(() => {
     const stampValue = scoreStamp;

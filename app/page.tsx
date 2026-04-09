@@ -6,7 +6,6 @@ import { RequireSession } from "@/components/trip/RequireSession";
 import { useTrip } from "@/components/trip/TripProvider";
 import { isAdmin } from "@/lib/auth/session";
 import { buildRuntimeRoundTemplates } from "@/lib/trip/config";
-import { sumScores } from "@/lib/trip/scoring";
 
 function currentRoundId(rounds: ReturnType<typeof buildRuntimeRoundTemplates>) {
   const now = new Date().toISOString().slice(0, 10);
@@ -36,12 +35,21 @@ export default function Home() {
   const roundCollectionStats = runtimeRounds.map((round) => {
     const players = round.teeTimes.flatMap((g) => g.players);
     const complete = players.filter((p) => {
+      const aggregate = tripState.individualAggregateScores[round.id]?.[p];
+      if (aggregate) {
+        return aggregate.front9 !== "" && aggregate.back9 !== "" && aggregate.total !== "";
+      }
       const scores = tripState.individualScores[round.id]?.[p] ?? [];
       return scores.every((s) => s !== "");
     }).length;
     const totalScored = players.reduce((acc, p) => {
+      const aggregateTotal = tripState.individualAggregateScores[round.id]?.[p]?.total;
+      if (typeof aggregateTotal === "number" && aggregateTotal > 0) {
+        return acc + aggregateTotal;
+      }
       const scores = tripState.individualScores[round.id]?.[p] ?? [];
-      return acc + sumScores(scores);
+      const holeTotal = scores.reduce<number>((sum, value) => sum + (Number(value) || 0), 0);
+      return acc + holeTotal;
     }, 0);
     return { round, players: players.length, complete, totalScored, status: roundStatus(round.id) };
   });

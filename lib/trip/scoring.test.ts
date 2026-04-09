@@ -18,9 +18,9 @@ describe("sumScores", () => {
 describe("team scoring", () => {
   it("marks tied lowest team scores as winners", () => {
     const scored = scoreTeamCards([
-      { teamName: "Team 1", players: ["A"], holeScores: [3, 4, 3] },
-      { teamName: "Team 2", players: ["B"], holeScores: [3, 4, 3] },
-      { teamName: "Team 3", players: ["C"], holeScores: [4, 4, 4] },
+      { teamName: "Team 1", players: ["A"], holeScores: [3, 4, 3], aggregateScore: { front9: "", back9: "", total: "" } },
+      { teamName: "Team 2", players: ["B"], holeScores: [3, 4, 3], aggregateScore: { front9: "", back9: "", total: "" } },
+      { teamName: "Team 3", players: ["C"], holeScores: [4, 4, 4], aggregateScore: { front9: "", back9: "", total: "" } },
     ]);
 
     expect(scored.filter((s) => s.isWinner)).toHaveLength(2);

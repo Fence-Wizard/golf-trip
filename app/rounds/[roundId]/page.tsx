@@ -65,8 +65,15 @@ export default function RoundPage() {
     requestedPlayerFromLeaderboard !== null ||
     requestedTeamIndex !== null;
   const hasRoundData =
-    roundPlayers.some((player) => tripState.individualScores[round.id][player].some((score) => score !== "")) ||
-    tripState.teamScores[round.id].some((team) => team.holeScores.some((score) => score !== ""));
+    roundPlayers.some((player) => {
+      const aggregate = tripState.individualAggregateScores[round.id]?.[player];
+      if (aggregate && (aggregate.front9 !== "" || aggregate.back9 !== "" || aggregate.total !== "")) return true;
+      return tripState.individualScores[round.id][player].some((score) => score !== "");
+    }) ||
+    tripState.teamScores[round.id].some(
+      (team) =>
+        team.aggregateScore.front9 !== "" || team.aggregateScore.back9 !== "" || team.aggregateScore.total !== "",
+    );
 
   const handleModeChange = (nextMode: "individual" | "team") => {
     if (nextMode === mode) return;

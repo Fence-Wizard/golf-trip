@@ -38,13 +38,24 @@ export default function RoundLeaderboardPage() {
   const roundPlayers = round.teeTimes.flatMap((group) => group.players);
   const incompleteCards =
     [2, 3, 4].includes(round.id) && tripState.roundEntryMode[round.id] === "team"
-      ? tripState.teamScores[round.id].filter((team) => team.holeScores.some((score) => score === "")).length
-      : roundPlayers.filter((player) => tripState.individualScores[round.id][player].some((score) => score === "")).length;
+      ? tripState.teamScores[round.id].filter(
+          (team) =>
+            team.aggregateScore.front9 === "" ||
+            team.aggregateScore.back9 === "" ||
+            team.aggregateScore.total === "",
+        ).length
+      : roundPlayers.filter((player) => {
+          const aggregate = tripState.individualAggregateScores[round.id]?.[player];
+          if (aggregate) {
+            return aggregate.front9 === "" || aggregate.back9 === "" || aggregate.total === "";
+          }
+          return tripState.individualScores[round.id][player].some((score) => score === "");
+        }).length;
   const openDiscrepancies = tripState.teamScoreDiscrepancies.filter(
     (item) => item.roundId === round.id && item.status === "open",
   ).length;
   const finalizeRisks = [
-    incompleteCards > 0 ? `${incompleteCards} card(s) still have unscored holes.` : null,
+    incompleteCards > 0 ? `${incompleteCards} card(s) still have missing front/back/total scores.` : null,
     openDiscrepancies > 0 ? `${openDiscrepancies} team discrepancy alert(s) are still unresolved.` : null,
   ].filter((item): item is string => Boolean(item));
 

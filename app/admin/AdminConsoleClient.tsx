@@ -1,11 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { AppShell } from "@/components/trip/AppShell";
 import { CourseAdminEditor } from "@/components/trip/CourseAdminEditor";
 import { RequireAdmin, RequireSession } from "@/components/trip/RequireSession";
 import { useTrip } from "@/components/trip/TripProvider";
 import { buildRuntimeRoundTemplates, getTeamScorers } from "@/lib/trip/config";
+import { TeeGroup } from "@/lib/trip/types";
 
 type AdminTab = "course" | "players" | "groupings" | "flights" | "payouts" | "operations";
 
@@ -18,11 +19,28 @@ const TAB_OPTIONS: Array<{ id: AdminTab; label: string }> = [
   { id: "operations", label: "Operations" },
 ];
 
+function suggestBalancedGroups(players: string[], groupCount: number, averages: Record<string, number>): string[][] {
+  const sorted = [...players].sort((a, b) => (averages[a] ?? 99) - (averages[b] ?? 99) || a.localeCompare(b));
+  const groups = Array.from({ length: groupCount }, () => [] as string[]);
+  const snakeOrder = [...Array.from({ length: groupCount }, (_, idx) => idx), ...Array.from({ length: groupCount }, (_, idx) => groupCount - idx - 1)];
+  let pickIndex = 0;
+  for (const player of sorted) {
+    const targetGroup = snakeOrder[pickIndex % snakeOrder.length];
+    groups[targetGroup].push(player);
+    pickIndex += 1;
+  }
+  return groups;
+}
+
 export default function AdminConsoleClient() {
   const [selectedRoundId, setSelectedRoundId] = useState(1);
   const [activeTab, setActiveTab] = useState<AdminTab>("course");
+  const [suggestedGroups, setSuggestedGroups] = useState<TeeGroup[] | null>(null);
+  const [swapPlayerA, setSwapPlayerA] = useState("");
+  const [swapPlayerB, setSwapPlayerB] = useState("");
   const {
     tripState,
+    scoreTotals,
     storageMode,
     loadDemoScores,
     clearDemoScores,
@@ -34,6 +52,21 @@ export default function AdminConsoleClient() {
   } = useTrip();
   const runtimeRounds = buildRuntimeRoundTemplates(tripState.roundGroupings);
   const selectedRound = runtimeRounds.find((round) => round.id === selectedRoundId) ?? runtimeRounds[0];
+  const selectedRoundPlayers = useMemo(
+    () => Array.from(new Set(selectedRound.teeTimes.flatMap((group) => group.players))),
+    [selectedRound],
+  );
+  const tournamentAverages = useMemo(() => {
+    return Object.fromEntries(
+      tripState.roster.map((player) => {
+        const entries = runtimeRounds
+          .map((round) => scoreTotals[round.id]?.[player] ?? 0)
+          .filter((total) => total > 0);
+        const average = entries.length > 0 ? entries.reduce((sum, value) => sum + value, 0) / entries.length : 99;
+        return [player, average];
+      }),
+    ) as Record<string, number>;
+  }, [runtimeRounds, scoreTotals, tripState.roster]);
   const recentEdits = tripState.scoreEditHistory
     .filter((event) => event.roundId === selectedRoundId)
     .slice(-20)
@@ -61,7 +94,10 @@ export default function AdminConsoleClient() {
               id="admin-round-select"
               className="input"
               value={selectedRoundId}
-              onChange={(e) => setSelectedRoundId(Number(e.target.value))}
+              onChange={(e) => {
+                setSelectedRoundId(Number(e.target.value));
+                setSuggestedGroups(null);
+              }}
             >
               {runtimeRounds.map((round) => (
                 <option key={round.id} value={round.id}>
@@ -127,7 +163,128 @@ export default function AdminConsoleClient() {
           {activeTab === "groupings" ? (
             <section className="card">
               <h2>Round Groupings</h2>
-              <p className="muted">Update tee times and group players for the selected round.</p>
+              <p className="muted">
+                Realign teams manually, suggest balanced teams from tournament averages, and edit round-only player names.
+              </p>
+              <div className="row-wrap">
+                <button
+                  type="button"
+                  className="button ghost"
+                  onClick={() => {
+                    const currentPlayers = selectedRound.teeTimes.flatMap((group) => group.players);
+                    const suggestedPlayers = suggestBalancedGroups(
+                      currentPlayers,
+                      selectedRound.teeTimes.length,
+                      tournamentAverages,
+                    );
+                    const nextSuggestions = selectedRound.teeTimes.map((group, index) => ({
+                      time: group.time,
+                      players: suggestedPlayers[index] ?? group.players,
+                    }));
+                    setSuggestedGroups(nextSuggestions);
+                  }}
+                >
+                  Suggest balanced teams
+                </button>
+                {suggestedGroups ? (
+                  <button
+                    type="button"
+                    className="button"
+                    onClick={() => {
+                      for (const [groupIndex, group] of suggestedGroups.entries()) {
+                        updateRoundGrouping(selectedRoundId, groupIndex, group);
+                      }
+                      setSuggestedGroups(null);
+                    }}
+                  >
+                    Apply suggested teams
+                  </button>
+                ) : null}
+                {suggestedGroups ? (
+                  <button type="button" className="button ghost" onClick={() => setSuggestedGroups(null)}>
+                    Clear suggestions
+                  </button>
+                ) : null}
+              </div>
+              <div className="inner-card">
+                <h3>Swap two players</h3>
+                <p className="muted">Quickly swap player slots across this round's teams.</p>
+                <div className="grid-holes">
+                  <label className="hole-input">
+                    <span>Player A</span>
+                    <select
+                      className="input"
+                      value={swapPlayerA}
+                      onChange={(e) => setSwapPlayerA(e.target.value)}
+                    >
+                      <option value="">Select player</option>
+                      {selectedRoundPlayers.map((player) => (
+                        <option key={`swap-a-${player}`} value={player}>
+                          {player}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="hole-input">
+                    <span>Player B</span>
+                    <select
+                      className="input"
+                      value={swapPlayerB}
+                      onChange={(e) => setSwapPlayerB(e.target.value)}
+                    >
+                      <option value="">Select player</option>
+                      {selectedRoundPlayers.map((player) => (
+                        <option key={`swap-b-${player}`} value={player}>
+                          {player}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+                <div className="row-wrap">
+                  <button
+                    type="button"
+                    className="button"
+                    disabled={!swapPlayerA || !swapPlayerB || swapPlayerA === swapPlayerB}
+                    onClick={() => {
+                      if (!swapPlayerA || !swapPlayerB || swapPlayerA === swapPlayerB) return;
+                      const nextGroups = selectedRound.teeTimes.map((group) => ({
+                        ...group,
+                        players: group.players.map((player) => {
+                          if (player === swapPlayerA) return swapPlayerB;
+                          if (player === swapPlayerB) return swapPlayerA;
+                          return player;
+                        }),
+                      }));
+                      for (const [groupIndex, group] of nextGroups.entries()) {
+                        updateRoundGrouping(selectedRoundId, groupIndex, group);
+                      }
+                    }}
+                  >
+                    Swap players in this round
+                  </button>
+                  <button
+                    type="button"
+                    className="button ghost"
+                    onClick={() => {
+                      setSwapPlayerA("");
+                      setSwapPlayerB("");
+                    }}
+                  >
+                    Clear
+                  </button>
+                </div>
+              </div>
+              {suggestedGroups ? (
+                <div className="warning">
+                  <p>Suggested teams (lower average = stronger golfer):</p>
+                  {suggestedGroups.map((group, index) => (
+                    <p key={`suggested-${index}`}>
+                      Team {index + 1}: {group.players.join(", ")}
+                    </p>
+                  ))}
+                </div>
+              ) : null}
               <div className="stack-sm">
                 {selectedRound.teeTimes.map((group, groupIndex) => (
                   <div className="inner-card" key={`group-${selectedRoundId}-${groupIndex}`}>
@@ -143,17 +300,18 @@ export default function AdminConsoleClient() {
                       {group.players.map((player, playerIndex) => (
                         <label key={`group-player-${groupIndex}-${playerIndex}`} className="hole-input">
                           <span>Player {playerIndex + 1}</span>
-                          <select
+                          <input
                             id={`group-player-${groupIndex}-${playerIndex}`}
                             className="input"
                             defaultValue={player}
-                          >
-                            {tripState.roster.map((rosterPlayer) => (
-                              <option key={`${groupIndex}-${playerIndex}-${rosterPlayer}`} value={rosterPlayer}>
-                                {rosterPlayer}
-                              </option>
-                            ))}
-                          </select>
+                            placeholder="Name for this round slot"
+                          />
+                          <span className="muted">
+                            Avg:{" "}
+                            {Number.isFinite(tournamentAverages[player]) && tournamentAverages[player] < 99
+                              ? tournamentAverages[player].toFixed(1)
+                              : "N/A"}
+                          </span>
                         </label>
                       ))}
                     </div>
@@ -165,7 +323,7 @@ export default function AdminConsoleClient() {
                         const nextPlayers = group.players.map((_, playerIndex) => {
                           const select = document.getElementById(
                             `group-player-${groupIndex}-${playerIndex}`,
-                          ) as HTMLSelectElement | null;
+                          ) as HTMLInputElement | null;
                           return select?.value ?? group.players[playerIndex];
                         });
                         updateRoundGrouping(selectedRoundId, groupIndex, {

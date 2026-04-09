@@ -10,6 +10,8 @@ import {
 } from "@/lib/auth/session";
 import {
   ADMIN_PLAYER,
+  buildEmptyAggregateScoreCard,
+  buildInitialIndividualAggregateScoresForRoster,
   buildInitialIndividualScoresForRoster,
   buildInitialRoundLiveState,
   buildInitialTeamEntrySubmissions,
@@ -27,7 +29,7 @@ import {
   logoutViaServer,
   saveRemoteTripState,
 } from "@/lib/trip/apiClient";
-import { buildInitialTripState, loadTripState, saveTripState } from "@/lib/trip/storage";
+import { buildInitialTripState, loadTripState, normalizeTripState, saveTripState } from "@/lib/trip/storage";
 import { trackEvent } from "@/lib/observability";
 import {
   HoleData,
@@ -60,7 +62,19 @@ interface TripContextValue {
   login: (player: string, role: string, pin: string) => Promise<boolean>;
   logout: () => Promise<void>;
   updateIndividualHoleScore: (roundId: number, player: string, holeIndex: number, value: string) => boolean;
+  updateIndividualAggregateScore: (
+    roundId: number,
+    player: string,
+    field: "front9" | "back9" | "total",
+    value: string,
+  ) => boolean;
   updateTeamHoleScore: (roundId: number, teamIndex: number, holeIndex: number, value: string) => boolean;
+  updateTeamAggregateScore: (
+    roundId: number,
+    teamIndex: number,
+    field: "front9" | "back9" | "total",
+    value: string,
+  ) => boolean;
   updateRoundEntryMode: (roundId: number, mode: ScoreEntryMode, force?: boolean) => void;
   updateCourseHole: (roundId: number, holeIndex: number, field: keyof HoleData, value: string) => void;
   setHoleVerification: (roundId: number, holeIndex: number, verified: boolean) => void;
@@ -104,6 +118,13 @@ function toHoleNumber(value: string): number | "" {
   const numeric = Number(value);
   if (Number.isNaN(numeric)) return "";
   return Math.max(1, Math.min(MAX_STROKES_PER_HOLE, Math.trunc(numeric)));
+}
+
+function toAggregateNumber(value: string): number | "" {
+  if (value === "") return "";
+  const numeric = Number(value);
+  if (Number.isNaN(numeric)) return "";
+  return Math.max(1, Math.min(200, Math.trunc(numeric)));
 }
 
 function sanitizeRole(role: string): Role {
@@ -211,8 +232,9 @@ export function TripProvider({ children }: { children: React.ReactNode }) {
         const remoteState = await fetchRemoteTripState();
         if (cancelled) return;
         if (remoteState.ok && remoteState.payload) {
-          setTripState(remoteState.payload.state);
-          saveTripState(remoteState.payload.state);
+          const normalizedRemoteState = normalizeTripState(remoteState.payload.state);
+          setTripState(normalizedRemoteState);
+          saveTripState(normalizedRemoteState);
           setStorageMode("server");
           setServerVersion(remoteState.payload.version);
           setIsHydrated(true);
@@ -262,7 +284,7 @@ export function TripProvider({ children }: { children: React.ReactNode }) {
               return;
             }
 
-            saveTripState(remoteSave.payload.state);
+            saveTripState(normalizeTripState(remoteSave.payload.state));
             setServerVersion(remoteSave.payload.version);
           }
 
@@ -287,8 +309,9 @@ export function TripProvider({ children }: { children: React.ReactNode }) {
           const remote = await fetchRemoteTripState();
           if (!remote.ok || !remote.payload || cancelled) return;
           if (serverVersion !== null && remote.payload.version <= serverVersion) return;
-          saveTripState(remote.payload.state);
-          setTripState(remote.payload.state);
+          const normalizedRemoteState = normalizeTripState(remote.payload.state);
+          saveTripState(normalizedRemoteState);
+          setTripState(normalizedRemoteState);
           setServerVersion(remote.payload.version);
         } catch {
           // Silent fallback keeps local experience smooth when connectivity drops.
@@ -303,8 +326,14 @@ export function TripProvider({ children }: { children: React.ReactNode }) {
   }, [demoMode, dirtyRoundIds.length, isHydrated, serverVersion, session.player, session.role, storageMode]);
 
   const scoreTotals = useMemo(
-    () => buildRoundTotals(tripState.individualScores, tripState.roster, runtimeRounds),
-    [runtimeRounds, tripState.individualScores, tripState.roster],
+    () =>
+      buildRoundTotals(
+        tripState.individualScores,
+        tripState.individualAggregateScores,
+        tripState.roster,
+        runtimeRounds,
+      ),
+    [runtimeRounds, tripState.individualAggregateScores, tripState.individualScores, tripState.roster],
   );
   const teamResults = useMemo(
     () => buildTeamResults(scoreTotals, tripState.teamScores, tripState.roundEntryMode, runtimeRounds),
@@ -375,13 +404,26 @@ export function TripProvider({ children }: { children: React.ReactNode }) {
   const isRoundComplete = (roundId: number, currentState: TripState) => {
     const mode = currentState.roundEntryMode[roundId];
     if ([2, 3, 4].includes(roundId) && mode === "team") {
-      return currentState.teamScores[roundId].every((team) => team.holeScores.every((score) => score !== ""));
+      return currentState.teamScores[roundId].every(
+        (team) =>
+          team.aggregateScore.front9 !== "" &&
+          team.aggregateScore.back9 !== "" &&
+          team.aggregateScore.total !== "",
+      );
     }
     const round = runtimeRounds.find((item) => item.id === roundId);
     if (!round) return false;
-    return round.teeTimes
-      .flatMap((group) => group.players)
-      .every((player) => currentState.individualScores[roundId][player].every((score) => score !== ""));
+    return round.teeTimes.flatMap((group) => group.players).every((player) => {
+      const aggregate = currentState.individualAggregateScores[roundId]?.[player];
+      if (aggregate) {
+        return (
+          aggregate.front9 !== "" &&
+          aggregate.back9 !== "" &&
+          aggregate.total !== ""
+        );
+      }
+      return currentState.individualScores[roundId][player].every((score) => score !== "");
+    });
   };
 
   const updateRoundStatusMessage = (roundId: number, message: string) => {
@@ -485,6 +527,61 @@ export function TripProvider({ children }: { children: React.ReactNode }) {
     return changed;
   };
 
+  const updateIndividualAggregateScore = (
+    roundId: number,
+    player: string,
+    field: "front9" | "back9" | "total",
+    rawValue: string,
+  ): boolean => {
+    if (!canEditRoundScores(roundId)) {
+      updateRoundStatusMessage(roundId, "Round is finalized. Admin override is required to edit.");
+      return false;
+    }
+    if (!tripState.individualScores[roundId]?.[player]) return false;
+    const editedBy = session.player ?? "unknown";
+    let changed = false;
+    const nowIso = new Date().toISOString();
+
+    setTripState((prev) => {
+      const roundAggregates = prev.individualAggregateScores[roundId] ?? {};
+      const playerAggregate = roundAggregates[player] ?? buildEmptyAggregateScoreCard();
+      const previousValue = playerAggregate[field];
+      const nextValue = toAggregateNumber(rawValue);
+      if (previousValue === nextValue) return prev;
+      changed = true;
+
+      return {
+        ...prev,
+        individualAggregateScores: {
+          ...prev.individualAggregateScores,
+          [roundId]: {
+            ...roundAggregates,
+            [player]: {
+              ...playerAggregate,
+              [field]: nextValue,
+            },
+          },
+        },
+        roundLive: {
+          ...prev.roundLive,
+          [roundId]: {
+            ...prev.roundLive[roundId],
+            lastScoreUpdateAt: nowIso,
+          },
+        },
+      };
+    });
+
+    if (changed) {
+      markRoundDirty(roundId);
+      trackEvent("score_updated", { roundId, targetType: "player-aggregate", player, field, editedBy });
+      if (isRoundComplete(roundId, tripState)) {
+        trackEvent("round_completed", { roundId, by: editedBy, source: "score_completion" });
+      }
+    }
+    return changed;
+  };
+
   const updateTeamHoleScore = (
     roundId: number,
     teamIndex: number,
@@ -562,6 +659,66 @@ export function TripProvider({ children }: { children: React.ReactNode }) {
     if (changed) {
       markRoundDirty(roundId);
       trackEvent("score_updated", { roundId, targetType: "team", hole: holeIndex + 1, team: teamName });
+      if (isRoundComplete(roundId, tripState)) {
+        trackEvent("round_completed", { roundId, by: editedBy, source: "score_completion" });
+      }
+    }
+    return changed;
+  };
+
+  const updateTeamAggregateScore = (
+    roundId: number,
+    teamIndex: number,
+    field: "front9" | "back9" | "total",
+    rawValue: string,
+  ): boolean => {
+    if (!canEditRoundScores(roundId)) {
+      updateRoundStatusMessage(roundId, "Round is finalized. Admin override is required to edit.");
+      return false;
+    }
+    if (!canEditTeamCard(roundId, teamIndex)) {
+      updateRoundStatusMessage(roundId, "Only admin can edit team scores.");
+      return false;
+    }
+    if (!tripState.teamScores[roundId]?.[teamIndex]) return false;
+    const editedBy = session.player ?? "unknown";
+    const teamName = tripState.teamScores[roundId][teamIndex].teamName;
+    let changed = false;
+
+    setTripState((prev) => {
+      const previousValue = prev.teamScores[roundId][teamIndex].aggregateScore[field];
+      const nextValue = toAggregateNumber(rawValue);
+      if (previousValue === nextValue) return prev;
+      changed = true;
+
+      return {
+        ...prev,
+        teamScores: {
+          ...prev.teamScores,
+          [roundId]: prev.teamScores[roundId].map((team, idx) => {
+            if (idx !== teamIndex) return team;
+            return {
+              ...team,
+              aggregateScore: {
+                ...team.aggregateScore,
+                [field]: nextValue,
+              },
+            };
+          }),
+        },
+        roundLive: {
+          ...prev.roundLive,
+          [roundId]: {
+            ...prev.roundLive[roundId],
+            lastScoreUpdateAt: new Date().toISOString(),
+          },
+        },
+      };
+    });
+
+    if (changed) {
+      markRoundDirty(roundId);
+      trackEvent("score_updated", { roundId, targetType: "team-aggregate", team: teamName, field, editedBy });
       if (isRoundComplete(roundId, tripState)) {
         trackEvent("round_completed", { roundId, by: editedBy, source: "score_completion" });
       }
@@ -678,9 +835,21 @@ export function TripProvider({ children }: { children: React.ReactNode }) {
         delete nextMap[existingName];
         return nextMap;
       };
+      const renameAggregateKey = (map: TripState["individualAggregateScores"][number]) => {
+        if (!map?.[existingName]) return map;
+        const nextMap = { ...map, [trimmed]: { ...map[existingName] } };
+        delete nextMap[existingName];
+        return nextMap;
+      };
 
       const nextIndividualScores: TripState["individualScores"] = Object.fromEntries(
         Object.entries(prev.individualScores).map(([roundId, roundScores]) => [Number(roundId), renameKey(roundScores)]),
+      );
+      const nextIndividualAggregateScores: TripState["individualAggregateScores"] = Object.fromEntries(
+        Object.entries(prev.individualAggregateScores).map(([roundId, roundScores]) => [
+          Number(roundId),
+          renameAggregateKey(roundScores),
+        ]),
       );
 
       const nextRoundGroupings = Object.fromEntries(
@@ -739,6 +908,7 @@ export function TripProvider({ children }: { children: React.ReactNode }) {
         ...prev,
         roster: prev.roster.map((player) => (player === existingName ? trimmed : player)),
         individualScores: nextIndividualScores,
+        individualAggregateScores: nextIndividualAggregateScores,
         roundGroupings: nextRoundGroupings,
         teamScores: nextTeamScores,
         flights: nextFlights,
@@ -782,6 +952,19 @@ export function TripProvider({ children }: { children: React.ReactNode }) {
       const nextTeamScoresForRound = (prev.teamScores[roundId] ?? []).map((team, idx) =>
         idx === groupIndex ? { ...team, players: [...normalized.players] } : team,
       );
+      const existingRoundScores = prev.individualScores[roundId] ?? {};
+      const existingRoundAggregateScores = prev.individualAggregateScores[roundId] ?? {};
+      const allRoundPlayers = new Set(nextGroups.flatMap((group) => group.players));
+      const nextRoundIndividualScores = { ...existingRoundScores };
+      const nextRoundAggregateScores = { ...existingRoundAggregateScores };
+      for (const player of allRoundPlayers) {
+        if (!nextRoundIndividualScores[player]) {
+          nextRoundIndividualScores[player] = Array.from({ length: 18 }, () => "");
+        }
+        if (!nextRoundAggregateScores[player]) {
+          nextRoundAggregateScores[player] = buildEmptyAggregateScoreCard();
+        }
+      }
       const delegateOverride = prev.teamDelegateAssignments[roundId]?.[groupIndex];
       const [scorerA, scorerB] = getTeamScorers(roundId, groupIndex, delegateOverride, nextRoundGroupings);
       const existingByScorer = prev.teamEntrySubmissions[roundId]?.[groupIndex] ?? {};
@@ -791,6 +974,14 @@ export function TripProvider({ children }: { children: React.ReactNode }) {
         teamScores: {
           ...prev.teamScores,
           [roundId]: nextTeamScoresForRound,
+        },
+        individualScores: {
+          ...prev.individualScores,
+          [roundId]: nextRoundIndividualScores,
+        },
+        individualAggregateScores: {
+          ...prev.individualAggregateScores,
+          [roundId]: nextRoundAggregateScores,
         },
         teamEntrySubmissions: {
           ...prev.teamEntrySubmissions,
@@ -857,6 +1048,7 @@ export function TripProvider({ children }: { children: React.ReactNode }) {
 
   const loadDemoScores = () => {
     const nextIndividual = buildInitialIndividualScoresForRoster(tripState.roster, tripState.roundGroupings);
+    const nextIndividualAggregate = buildInitialIndividualAggregateScoresForRoster(tripState.roster, tripState.roundGroupings);
     const nextTeam = buildInitialTeamScores(tripState.roundGroupings);
     const nextTeamSubmissions = buildInitialTeamEntrySubmissions(
       tripState.teamDelegateAssignments,
@@ -868,12 +1060,11 @@ export function TripProvider({ children }: { children: React.ReactNode }) {
       if ([2, 3, 4].includes(round.id)) {
         nextTeam[round.id] = nextTeam[round.id].map((team, teamIdx) => ({
           ...team,
-          holeScores: team.holeScores.map((_, holeIdx) => {
-            if (holeIdx > 8) return "";
-            const par = tripState.courseDataPublished[round.id]?.[holeIdx]?.par ?? 4;
-            const delta = (teamIdx + holeIdx) % 3 === 0 ? -1 : 0;
-            return Math.max(1, Math.min(MAX_STROKES_PER_HOLE, par + delta));
-          }),
+          aggregateScore: {
+            front9: 34 + teamIdx,
+            back9: 35 + teamIdx,
+            total: 69 + teamIdx * 2,
+          },
         }));
         for (const [teamIdx, team] of nextTeam[round.id].entries()) {
           const [scorerA, scorerB] = getTeamScorers(
@@ -895,6 +1086,15 @@ export function TripProvider({ children }: { children: React.ReactNode }) {
               const delta = (playerIdx + holeIdx) % 4 === 0 ? -1 : (playerIdx + holeIdx) % 4 === 1 ? 1 : 0;
               return Math.max(1, Math.min(MAX_STROKES_PER_HOLE, par + delta));
             });
+            const front9 = nextIndividual[round.id][player].slice(0, 9).reduce<number>((acc, value) => acc + (Number(value) || 0), 0);
+            const back9 = nextIndividual[round.id][player]
+              .slice(9, 18)
+              .reduce<number>((acc, value) => acc + (Number(value) || 0), 0);
+            nextIndividualAggregate[round.id][player] = {
+              front9: front9 > 0 ? front9 : "",
+              back9: back9 > 0 ? back9 : "",
+              total: front9 + back9 > 0 ? front9 + back9 : "",
+            };
           }
         }
       }
@@ -903,6 +1103,7 @@ export function TripProvider({ children }: { children: React.ReactNode }) {
     setTripState((prev) => ({
       ...prev,
       individualScores: nextIndividual,
+      individualAggregateScores: nextIndividualAggregate,
       teamScores: nextTeam,
       teamEntrySubmissions: nextTeamSubmissions,
       teamScoreDiscrepancies: [],
@@ -933,6 +1134,7 @@ export function TripProvider({ children }: { children: React.ReactNode }) {
     setTripState((prev) => ({
       ...prev,
       individualScores: buildInitialIndividualScoresForRoster(prev.roster, prev.roundGroupings),
+      individualAggregateScores: buildInitialIndividualAggregateScoresForRoster(prev.roster, prev.roundGroupings),
       teamScores: buildInitialTeamScores(prev.roundGroupings),
       teamEntrySubmissions: buildInitialTeamEntrySubmissions(prev.teamDelegateAssignments, prev.roundGroupings),
       teamScoreDiscrepancies: [],
@@ -998,8 +1200,9 @@ export function TripProvider({ children }: { children: React.ReactNode }) {
 
       const remoteState = await fetchRemoteTripState().catch(() => null);
       if (remoteState?.ok && remoteState.payload) {
-        setTripState(remoteState.payload.state);
-        saveTripState(remoteState.payload.state);
+        const normalizedRemoteState = normalizeTripState(remoteState.payload.state);
+        setTripState(normalizedRemoteState);
+        saveTripState(normalizedRemoteState);
         setStorageMode("server");
         setServerVersion(remoteState.payload.version);
       } else {
@@ -1018,7 +1221,9 @@ export function TripProvider({ children }: { children: React.ReactNode }) {
       setServerVersion(null);
     },
     updateIndividualHoleScore,
+    updateIndividualAggregateScore,
     updateTeamHoleScore,
+    updateTeamAggregateScore,
     updateRoundEntryMode: (roundId: number, mode: ScoreEntryMode, force = false) => {
       if (tripState.roundLive[roundId]?.isFinalized && session.role !== "admin") return;
       if (!force && session.role !== "admin") return;

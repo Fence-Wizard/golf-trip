@@ -1,4 +1,5 @@
 import {
+  AggregateScoreCard,
   CoursePublicationState,
   EntryModeByRound,
   HoleData,
@@ -241,6 +242,29 @@ export function buildInitialIndividualScoresForRoster(roster: string[], roundGro
   return scoreState;
 }
 
+export function buildEmptyAggregateScoreCard(): AggregateScoreCard {
+  return {
+    front9: "",
+    back9: "",
+    total: "",
+  };
+}
+
+export function buildInitialIndividualAggregateScoresForRoster(
+  roster: string[],
+  roundGroupings?: Record<number, TeeGroup[]>,
+) {
+  const scoreState: Record<number, Record<string, AggregateScoreCard>> = {};
+  const rounds = roundGroupings ? buildRuntimeRoundTemplates(roundGroupings) : roundTemplates;
+  for (const round of rounds) {
+    scoreState[round.id] = {};
+    for (const player of roster) {
+      scoreState[round.id][player] = buildEmptyAggregateScoreCard();
+    }
+  }
+  return scoreState;
+}
+
 export function buildInitialCourseData() {
   const data: Record<number, HoleData[]> = {};
   for (const round of roundTemplates) {
@@ -259,6 +283,7 @@ export function buildInitialTeamScores(roundGroupings?: Record<number, TeeGroup[
       teamName: `Team ${idx + 1}`,
       players: group.players,
       holeScores: Array.from({ length: 18 }, () => ""),
+      aggregateScore: buildEmptyAggregateScoreCard(),
     }));
   }
   return data;

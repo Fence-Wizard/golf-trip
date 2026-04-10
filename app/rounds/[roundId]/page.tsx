@@ -18,7 +18,8 @@ export default function RoundPage() {
   const [selectedPlayer, setSelectedPlayer] = useState("");
   const [pendingMode, setPendingMode] = useState<"individual" | "team" | null>(null);
   const [showModeConfirm, setShowModeConfirm] = useState(false);
-  const { session, tripState, updateRoundEntryMode, startRoundLive, stopRoundLive } = useTrip();
+  const [confirmFinalize, setConfirmFinalize] = useState(false);
+  const { session, tripState, updateRoundEntryMode, startRoundLive, stopRoundLive, finalizeRound, reopenRound } = useTrip();
   const resolvedRoundId = Number(params.roundId) || 1;
   const requestedHole = Math.max(1, Math.min(18, Number(searchParams.get("hole")) || 1));
   const requestedPlayer = searchParams.get("player");
@@ -57,6 +58,7 @@ export default function RoundPage() {
       : null;
   const mode = tripState.roundEntryMode[round.id];
   const liveState = tripState.roundLive[round.id];
+  const canFinalize = adminUser;
   const allowTeamModeToggle = [2, 3, 4].includes(round.id) && adminUser;
   const shouldShowScorecards =
     liveState.isStarted ||
@@ -74,6 +76,24 @@ export default function RoundPage() {
       (team) =>
         team.aggregateScore.front9 !== "" || team.aggregateScore.back9 !== "" || team.aggregateScore.total !== "",
     );
+  const incompleteCards =
+    [2, 3, 4].includes(round.id) && mode === "team"
+      ? tripState.teamScores[round.id].filter(
+          (team) =>
+            team.aggregateScore.front9 === "" ||
+            team.aggregateScore.back9 === "" ||
+            team.aggregateScore.total === "",
+        ).length
+      : roundPlayers.filter((player) => {
+          const aggregate = tripState.individualAggregateScores[round.id]?.[player];
+          if (aggregate) {
+            return aggregate.front9 === "" || aggregate.back9 === "" || aggregate.total === "";
+          }
+          return tripState.individualScores[round.id][player].some((score) => score === "");
+        }).length;
+  const finalizeRisks = [
+    incompleteCards > 0 ? `${incompleteCards} card(s) still have missing front/back/total scores.` : null,
+  ].filter((item): item is string => Boolean(item));
 
   const handleModeChange = (nextMode: "individual" | "team") => {
     if (nextMode === mode) return;
@@ -104,8 +124,8 @@ export default function RoundPage() {
             </div>
           </div>
           <div className="row-wrap">
-            <span className={`status-chip ${liveState.isStarted ? "live" : "not-started"}`}>
-              {liveState.isStarted ? "Live" : "Not started"}
+            <span className={`status-chip ${liveState.isFinalized ? "final" : liveState.isStarted ? "live" : "not-started"}`}>
+              {liveState.isFinalized ? "Final" : liveState.isStarted ? "Live" : "Not started"}
             </span>
             <span className="badge">{round.format}</span>
             <span className="badge">{round.teeWindow}</span>
@@ -130,10 +150,24 @@ export default function RoundPage() {
 
         {adminUser ? (
           <section id="round-control" className="card masters-start">
+            {canFinalize && finalizeRisks.length > 0 ? (
+              <div className="warning">
+                <strong>Round closing checklist</strong>
+                {finalizeRisks.map((risk) => (
+                  <p key={risk}>{risk}</p>
+                ))}
+              </div>
+            ) : null}
             <div className="row-between">
               <div>
                 <h3>Round status</h3>
-                <p className="muted">{liveState.isStarted ? "Scoring is open." : "Start round to open scoring."}</p>
+                <p className="muted">
+                  {liveState.isFinalized
+                    ? "Round is finalized. Reopen if score edits are needed."
+                    : liveState.isStarted
+                      ? "Scoring is open. Finalize here when all scores are entered."
+                      : "Start round to open scoring."}
+                </p>
               </div>
               <div className="row-wrap">
                 {liveState.isStarted ? (
@@ -148,8 +182,48 @@ export default function RoundPage() {
                 <Link href={`/rounds/${round.id}/leaderboard`} className="button ghost">
                   Open Leaderboard
                 </Link>
+                {canFinalize && !liveState.isFinalized ? (
+                  <button
+                    className="button"
+                    onClick={() => {
+                      if (finalizeRisks.length > 0 && !confirmFinalize) {
+                        setConfirmFinalize(true);
+                        return;
+                      }
+                      finalizeRound(round.id);
+                      setConfirmFinalize(false);
+                    }}
+                  >
+                    {finalizeRisks.length > 0 && !confirmFinalize ? "Review close-round risks" : "Finalize Round"}
+                  </button>
+                ) : null}
+                {canFinalize && liveState.isFinalized ? (
+                  <button className="button ghost" onClick={() => reopenRound(round.id)}>
+                    Reopen Round
+                  </button>
+                ) : null}
               </div>
             </div>
+            {confirmFinalize && finalizeRisks.length > 0 ? (
+              <div className="warning">
+                <p>Finalize anyway? This will lock the round with outstanding checklist items.</p>
+                <div className="row-wrap">
+                  <button
+                    type="button"
+                    className="button"
+                    onClick={() => {
+                      finalizeRound(round.id);
+                      setConfirmFinalize(false);
+                    }}
+                  >
+                    Finalize anyway
+                  </button>
+                  <button type="button" className="button ghost" onClick={() => setConfirmFinalize(false)}>
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ) : null}
           </section>
         ) : null}
 
